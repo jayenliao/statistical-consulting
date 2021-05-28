@@ -1,0 +1,826 @@
+---
+title: "統計諮詢 - 作業4"
+subtitle: "國立成功大學統計學系暨數據科學研究所"
+author: "廖傑恩（RE6094028）"
+date: "`r Sys.Date()`"
+geometry: margin = 1in
+fontsize: 12pt
+linestretch: 1.2
+documentclass: ctexart
+output:
+  rticles::ctex:
+    fig_caption: no
+    number_sections: yes
+    toc: no
+    keep_tex: yes
+classoption: "hyperref, a4paper"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = FALSE, fig.align = 'center')
+```
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(HH)
+library(dplyr)
+library(jtools)
+library(ggplot2)
+library(GGally)
+library(EnvStats)
+```
+
+# Exercise 11.3
+
+## 問題敘述
+
+因為在1970年代晚期經歷嚴重的缺水，Concord地區在1980年起開始執行節約措施。Hamilton（1983; 1992）研究了Concord家戶用水量的預測模型。本研究旨在以Concord家戶特徵對其1981年的用水量進行預測。
+
+## 資料介紹
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+data("concord")
+```
+
+資料是Concord`r nrow(concord)`個家戶的用水量以及家戶相關基本變項，共有`r ncol(concord)`個變項，說明如下表：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+df_column <- data.frame(變項名稱 = colnames(concord),
+                        變項意義 = c(
+                          '1981年家戶用水量（單位：立方英尺）',
+                          '1980年家戶用水量（單位：立方英尺）',
+                          '1981年家戶收入（單位：千元）',
+                          '戶長教育程度（單位：年）',
+                          '1981年夏季時家戶人數',
+                          '戶長是否退休，是=1，否=0'),
+                        變項類型 = c(rep('連續', 5), '類別'))
+knitr::kable(df_column)
+
+#1. `water81`: 1981年家戶用水量（單位：立方英尺），連續變項
+#2. `water80`: 1980年家戶用水量（單位：立方英尺）
+#3. `income`: 1981年家戶收入（單位：千元）
+#4. `educat`: 戶長教育程度（單位：年）
+#5. `peop81`: 1981年夏季時家戶人數
+#6. `retired`: 戶長是否退休，是=1，否=0。
+```
+
+## 資料探索
+
+我們繪製兩兩散佈圖、盒鬚圖或直方圖矩陣，並以二分變項分層，以快速觀察這些變項間的關聯：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+concord %>% mutate(retired = as.factor(retired)) %>%
+  ggpairs(., aes(colour=retired)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = .7))
+```
+
+由此矩陣可以發現，大部分數值型變項兩兩之間都有一定程度的線性相關，若直接進行線性迴歸的配適，可能會產生共線性（collinearity）的問題，必須要先檢查。此外，從圖 中也可以發現變項多呈現右偏（right-skewed）的分布，要經過檢查才能確定是否有離群值、影響點或是槓桿點。
+
+## 建立迴歸模型
+
+### 變數與模型定義
+
+- 定義變數
+
+    1. 令$Y$為`water81`（1981年家戶用水量）
+    2. 令$X_{1}$為`water80`（1980年家戶用水量）
+    3. 令$X_{2}$為`income`（1981年家戶收入）
+    4. 令$X_{3}$為`educat`（戶長教育程度）
+    5. 令$X_{4}$為`peop81`（1981年夏季時家戶人數）
+    6. 令$X_{5}$為`retired`（戶長是否退休），是=1，否=0。
+    
+- 定義模型
+
+\[ Y_i = \beta_0 + \beta_1X_{i1} + \beta_2X_{i2} + \beta_3X_{i3} + \beta_4X_{i4} + \beta_5X_{i5} + \epsilon_i,\ \forall i = 1, ..., 496\]
+
+其中$\epsilon_i \overset{iid} \sim N(0,{\sigma_i}^2)$。
+
+### 檢查共線性
+
+由散佈圖可知獨變項間彼此之間有相關性，故必須先檢查獨變項間是否有共線性，以免共線性影響配適結果，檢查方式為先計算全部獨變項間的變異膨脹因子（variance inflation factor, VIF）值：
+
+$$VIF_{p} = \frac{1}{1 - R_p^2}$$
+其中$R_p^2$為將第$i$個獨變項視為依變項，其他變項當成獨變項建立迴歸模型，所得之判定係數。
+
+獨變項之VIF值大於$5$表示其可由其他獨變項線性組合而成，表示與其他獨變項具有明顯的共線性。我們先剔除VIF值最大之獨變項，再進行一次VIF的計算，並重複以上過程直至所有獨變項之VIF值皆小於5為止。我們5個獨變項的VIF值如下表所示，均不具共線性。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(car)
+model_full <- lm(water81 ~ water80 + income + educat + peop81 + retired, data = concord)
+viff <- vif(model_full)
+df_vif <- data.frame(變項 = names(viff), VIF值 = viff)
+rownames(df_vif) <- NULL
+knitr::kable(df_vif)
+```
+
+### 逐步迴歸分析（stepwise selection）
+
+我們使用逐步選擇法中的向前選擇法（forward selection），逐步納入對模型貢獻程度最高的變項，直到模型配適度（goodness of fit）不再改善。在這裡，我們以赤池訊息量準則（Akaike information criterion, AIC）作為模型配適度指標，其公式如下：
+
+\[ AIC =-2\ln(L) + 2k = n\ln(\frac{SS_R}{n}) + 2k\]
+其中$L$為概似函數（likelihood function），$k$為參數數量，$n$為觀察值個數，$SS_R$是模型殘差平方和。
+
+由於$SS_R$越高，表示模型不能夠解釋的變異性越大，因此$AIC$越大表示模型配適越差。
+
+下表列出了我們進行逐步選擇的過程，其中「$+X$」意味著在上一步驟的模型中再納入變項$X$。我們的模型納入了所有獨變項。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+model_null <- lm(water81 ~ 1, data = concord)
+step_for <- step(model_null, scope = list(upper = model_full), direction = 'for', trace = 0)
+
+df <- step_for$anova[,c(1,6)]
+df <- df %>% mutate(步驟編號 = 1:nrow(df)) %>%
+  dplyr::select(步驟編號, Step, AIC)
+df$Step[1] <- '不考慮任何變項的原始模型'
+colnames(df) <- c('步驟編號', '步驟', '步驟完成後的模型AIC')
+knitr::kable(df)
+```
+
+經過變數挑選後的模型為：
+
+\[ \hat{y} = \hat{\beta_0} + \hat{\beta}_1x_{1} + \hat{\beta}_2x_{2} + \hat{\beta}_3x_{3} + \hat{\beta}_{4}x_{4} + \hat{\beta}_{5}x_{5} \]
+
+其中\(\hat{\beta_0}=\) `r round(step_for$coefficients['(Intercept)'], 4)`，\(\hat{\beta}_1=\) `r round(step_for$coefficients['water80'], 4)`，\(\hat{\beta}_2=\) `r round(step_for$coefficients['income'], 4)`，\(\hat{\beta}_3=\) `r round(step_for$coefficients['educat'], 4)`，\(\hat{\beta}_4=\) `r round(step_for$coefficients['peop81'], 4)`，\(\hat{\beta}_5=\) `r round(step_for$coefficients['retired'], 4)`。
+
+各個獨變項的係數估計值中，只有戶長教育程度`educat`（\(\hat{\beta}_4\)）為負，表示隨著戶長教育程度提高，家戶在1981年的用水量會降低，而其他變項都與家戶在1981年的用水量呈現正相關，包含：家戶在1980年的用水量（`water80`）、家戶在1981年的收入（`income`）、家戶在1981年的人數（`peop81`）以及與戶長退休（`retired`）。
+
+#### 模型診斷
+
+配適迴歸模型之後，我們應對殘差做檢定來確認線性迴歸模型中的前提假設$\epsilon_i \overset{iid} \sim N(0,{\sigma_i}^2)$是否滿足，包含殘差常態性、殘差變異數同質與殘差獨立性。我們先繪製4張殘差圖以觀察殘差樣態：由左上及右上兩圖可以發現，殘差期望值相相當接近0，不過殘差變異數有明顯變化趨勢。左下的常態Q-Q圖中資料點在值偏小及偏大處明顯偏離45度線，顯示殘差可能不服從常態分配。右下圖顯示資料中無槓桿點。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=5}
+par(mfcol = c(2, 2))
+plot(step_for)
+par(mfcol = c(1, 1))
+```
+
+- 殘差常態性檢驗
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(pty = 's')
+qqnorm(step_for$residuals, ylab = 'Residuals',
+       main = 'Normal Q-Q Plot of Residuals')
+qqline(step_for$residuals, col = 'red')
+sw_test <- shapiro.test(step_for$residuals)
+```
+
+上圖是模型殘差的Normal Q-Q plot，圖中值較大時資料點偏離45度線，顯示殘差可能不服從常態分配。我們以Shapiro-Wilk檢定檢驗模型殘差$\epsilon_i$是否為常態分配，令顯著水準為$0.05$，其假設如下:
+
+$$H_0: \epsilon_i \sim ND\ v.s.\ H_1: \epsilon_i\ does\ not \sim ND$$
+
+檢定結果：檢定統計量$W$為`r round(sw_test$statistic, 4)`，p值為`r round(sw_test$p.value,4)`，小於顯著水準，因此我們拒絕$H_0$，表示我們有足夠的證據顯示殘差不服從常態分配，診斷未通過。
+
+由於已知殘差常態假設未通過，便不繼續進行其他前提假設的檢驗。我們接著應對資料進行轉換，使得配適出來的迴歸模型得以符合線性迴歸的前提假設。
+
+## 對資料進行轉換後再進行迴歸分析
+
+### Box-Cox轉換
+
+在資料探索時，我們已知依變項（`water81`）與獨變項`water80`、`income`與`peop81`等變項的分佈呈現明顯的右偏，有可能是因此使得模型未通過殘差常態假設檢定。我們採用Box-Cox轉換法對這些變項進行轉換，以壓縮其尺度。令$Y'$為轉換後的依變項、$X_j'$為轉換後的獨變項$X_j$，其數學式如下：
+
+$$Y' = \begin{cases} \frac{Y^{\lambda} - 1}{\lambda},\quad if\ \lambda \neq 0 \\ \log Y,\quad if\ \lambda = 0\end{cases}\quad X_j' = \begin{cases} \frac{X_j^{\lambda_j} - 1}{\lambda_j},\quad if\ \lambda_j \neq 0 \\ \log X_j,\quad if\ \lambda_j = 0\end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+#然而`peop81`為家戶人數，尺度範圍相對小，且轉換後較難以解釋，因此不對其進行轉換
+boxcox_operator <- function(variable_name, dta=concord) {
+  boxcox_ <- MASS::boxcox(dta[,variable_name] ~ 1, lambda = seq(-2, 2, .01))
+  title(paste0('Plot of Box-Cox Transformation\nfor ', variable_name))
+  tuned_lambda <- boxcox_$x[which.max(boxcox_$y)]
+  return(tuned_lambda)
+}
+
+var_transform <- c('water81', 'water80', 'income', 'peop81')
+var_transform_s <- c('1981年的家戶用水量', '1980年的家戶用水量', '1981年的家戶收入', '1981年夏季的家戶人數')
+
+par(mfcol = c(2, 2))
+lambdas <- sapply(var_transform, boxcox_operator)
+```
+
+以上四張圖是分別對`watwe81`、`water80`、`income`與`peop81`進行Box-cox轉換時挑選$\lambda$的示意圖，我們在$[-2,\ 2]$範圍中挑選使概似函數值最大的$\lambda$，結果如下表所示：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+knitr::kable(data.frame(lambdas))
+```
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, include=FALSE}
+boxcox_ <- MASS::boxcox(model_full, lambda = seq(-2, 2, .0001), plotit = FALSE)
+tuned_lambda <- boxcox_$x[which.max(boxcox_$y)]
+plot(boxcox_$x, boxcox_$y, type='l', main = 'Plot of Box-Cox Transformation',
+     xlab = expression(lambda), ylab = 'Log-Likelihood')
+abline(h = max(boxcox_$y), lty = 2)
+abline(v = tuned_lambda, lty = 2)
+concord_new <- concord %>%
+  mutate(water81_boxcox = (water81^tuned_lambda - 1) / tuned_lambda,
+         water80_boxcox = (water80^tuned_lambda - 1) / tuned_lambda,
+         income_boxcox = (income^tuned_lambda - 1) / tuned_lambda,
+         peop81_boxcox = (peop81^tuned_lambda - 1) / tuned_lambda)
+
+boxcox_ <- MASS::boxcox(concord$water81 ~ 1, lambda = seq(-2, 2, .0001), plotit = FALSE)
+tuned_lambda <- boxcox_$x[which.max(boxcox_$y)]
+plot(boxcox_$x, boxcox_$y, type='l', main = 'Plot of Box-Cox Transformation',
+     xlab = expression(lambda), ylab = 'Log-Likelihood')
+abline(h = max(boxcox_$y), lty = 2)
+abline(v = tuned_lambda, lty = 2)
+concord_new <- concord %>%
+  mutate(water81_boxcox = (water81^tuned_lambda - 1) / tuned_lambda)
+```
+
+由於各$95\%$信賴區間都沒有包含$0$，因此我們不考慮$\log$轉換，而以這些非零的$\lambda$值對變項進行Box-cox轉換，轉換前與轉後的變項分佈如下8圖所示，可以發現轉換後的變項分佈對稱許多。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+boxcox_transform__ <- function(dta, variable_name, lambda_) {
+  return(as.numeric((dta[,variable_name]^lambda_ - 1) / lambda_))
+}
+ 
+concord_new<- sapply(var_transform, function(v) boxcox_transform__(concord, v, lambdas[v])) %>%
+  as.data.frame() %>% cbind(concord %>% dplyr::select(!var_transform))
+
+plt_distri_ <- function(dta1, dta2, v, vs) {
+  p1 <- qplot(dta1[,v], geom = 'blank') + 
+    geom_line(aes(y = ..density..), stat = 'density', colour = 'navyblue') + 
+    geom_histogram(aes(y = ..density..), alpha = .5) +
+    ggtitle(paste0('Concord地區', vs, '\n密度圖與直方圖')) +
+    labs(x = vs, y = '密度') + 
+    theme_bw() +
+    theme(text = element_text(family = '蘋方-繁 標準體'))
+  p2 <- qplot(dta2[,v], geom = 'blank') + 
+    geom_line(aes(y = ..density..), stat = 'density', colour = 'navyblue') + 
+    geom_histogram(aes(y = ..density..), alpha = .5) +
+    ggtitle(paste0('Concord地區', vs, '\n密度圖與直方圖（經Box-Cox轉換）')) +
+    labs(x = paste0('經Box-Cox轉換的', vs), y = '密度') + 
+    theme_bw() +
+    theme(text = element_text(family = '蘋方-繁 標準體'))
+  return(list(p1, p2))
+}
+
+names(var_transform_s) <- var_transform
+p <- plt_distri_(concord, concord_new, var_transform[1], var_transform_s[1])
+p <- plt_distri_(concord, concord_new, var_transform[2], var_transform_s[2])
+p <- plt_distri_(concord, concord_new, var_transform[3], var_transform_s[3])
+p <- plt_distri_(concord, concord_new, var_transform[4], var_transform_s[4])
+#plst <- lapply(var_transform, function(v) plt_distri_(concord, concord_new, v, var_transform_s[v]))
+```
+
+### 使用轉換後的資料配適迴歸模型
+
+我們接著使用經Box-Cox轉換的資料配適線性迴歸模型。
+
+#### 變數與模型定義
+
+- 定義變數
+
+    1. 令$Y'$為經Box-Cox轉換的`water81`（1981年家戶用水量）
+    2. 令$X'_{1}$為經Box-Cox轉換的`water80`（1980年家戶用水量）
+    3. 令$X'_{2}$為經Box-Cox轉換的`income`（1981年家戶收入）
+    4. 令$X_{3}$為`educat`（戶長教育程度）
+    5. 令$X_{4}$為`peop81`（1981年夏季時家戶人數）
+    6. 令$X_{5}$為`retired`（戶長是否退休），是=1，否=0。
+    
+- 定義模型
+
+\[ Y'_i = \beta_0' + \beta_1'X'_{i1} + \beta_2'X'_{i2} + \beta_3'X_{i3} + \beta_4'X_{i4} + \beta_5'X_{i5} + \epsilon_i',\ \forall i = 1, ..., 496\]
+
+其中$\epsilon_i' \overset{iid} \sim N(0,{\sigma_i'}^2)$。
+
+#### 檢查共線性
+
+在配適模型前，我們同樣以VIF值來檢查是否共線性存在。獨變項之VIF值大於$5$表示其可由其他獨變項線性組合而成，表示與其他獨變項具有明顯的共線性。我們先剔除VIF值最大之獨變項，再進行一次VIF的計算，並重複以上過程直至所有獨變項之VIF值皆小於5為止。我們5個獨變項的VIF值如下表所示，均不具共線性。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+removed_rows <- c(80, 85, 94, 118, 124, 125)
+#model_full_tr <- lm(water81 ~ water80 + income + educat + peop81 + retired, data = concord_new[-removed_rows,])
+model_full_tr <- lm(water81 ~ water80 + income + educat + peop81 + retired, data = concord_new)
+viff <- vif(model_full_tr)
+df_vif <- data.frame(變項 = names(viff), VIF值 = viff)
+rownames(df_vif) <- NULL
+knitr::kable(df_vif)
+```
+
+#### 逐步迴歸分析
+
+我們同樣使用向前選擇法，逐步納入對模型貢獻程度最高的變項，直到模型配適度不再改善。我們同樣以AIC作為模型配適度指標，$AIC$越大表示模型配適越差。下表列出了我們進行逐步選擇的過程，其中「$+X$」意味著在上一步驟的模型中再納入變項$X$。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+#model_null_tr <- lm(water81 ~ 1, data = concord_new[-removed_rows,])
+model_null_tr <- lm(water81 ~ 1, data = concord_new)
+step_for <- step(model_null_tr, scope = list(upper = model_full_tr), direction = 'for', trace = 0)
+df <- step_for$anova[,c(1,6)] 
+df <- df %>% mutate(步驟編號 = 1:nrow(df)) %>%
+  dplyr::select(步驟編號, Step, AIC)
+df$Step[1] <- '不考慮任何變項的原始模型'
+colnames(df) <- c('步驟編號', '步驟', '步驟完成後的模型AIC')
+knitr::kable(df)
+```
+
+經過變數挑選後的模型為：
+
+\[ \hat{y}' = \hat{\beta_0'} + \hat{\beta_1'}x_{1} + \hat{\beta_2'}x_{2} + \hat{\beta_4'}x_{4} \]
+
+其中\(\hat{\beta_0'}=\) `r round(step_for$coefficients['(Intercept)'], 4)`，\(\hat{\beta_1'}=\) `r round(step_for$coefficients['water80'], 4)`，\(\hat{\beta_2'}=\) `r round(step_for$coefficients['income'], 4)`，\(\hat{\beta_4'}=\) `r round(step_for$coefficients['peop81'], 4)`。
+
+各個獨變項的係數估計值都為正與家戶在1981年經由Box-Cox轉換的用水量呈現正相關，包含：經由Box-Cox轉換的1980年家戶用水量（`water80`）、經由Box-Cox轉換的1981年家戶收入（`income`）以及家戶在1981年的人數（`peop81`）。
+
+#### 模型診斷
+
+配適迴歸模型之後，我們應對殘差做檢定來確認線性迴歸模型中的前提假設$\epsilon_i' \overset{iid} \sim N(0,{\sigma_i'}^2)$是否滿足，包含殘差常態性、殘差變異數同質與殘差獨立性。我們先繪製4張殘差圖以觀察殘差樣態：由左上及右上兩圖可以發現，殘差期望值相相當接近0，不過殘差變異數似乎有變化趨勢。左下的常態Q-Q圖中資料點在值偏小及偏大處偏離45度線，顯示殘差可能不服從常態分配。右下圖顯示資料中無槓桿點。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=5}
+par(mfcol = c(2, 2))
+plot(step_for)
+```
+
+- 殘差常態性檢驗
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sw_test <- shapiro.test(step_for$residuals)
+ks_test <- ks.test(step_for$residuals, rnorm(100))
+```
+
+我們以Shapiro-Wilk檢定與Kolmogorov-Smirnov檢定檢驗模型殘差$\epsilon_i$是否為常態分配，令顯著水準為$0.05$，其假設如下:
+
+$$H_0: \epsilon_i' \sim ND\ v.s.\ H_1: \epsilon_i'\ does\ not \sim ND$$
+
+Shapiro-Wilk檢定結果：檢定統計量$W$為`r round(sw_test$statistic, 4)`，p值為`r round(sw_test$p.value,4)`，小於顯著水準。Kolmogorov-Smirnov檢定結果：檢定統計量$D$為`r round(ks_test$statistic, 4)`，p值為`r round(ks_test$p.value,4)`。因此我們拒絕$H_0$，表示我們有足夠的證據顯示殘差不服從常態分配，診斷未通過。
+
+- 以Brown-Forsythe檢定檢驗殘差變異同質性（令顯著水準為$0.05$）
+
+$$\begin{cases} H_{0}: \sigma_i'^2 = \sigma_{i'}'^2\ \forall i \neq i' \\ H_{1}:Not\ H_0\end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(onewaytests)
+bf_ <- concord_new %>%
+  mutate(group = as.factor(water81 > median(water81)), residuals_ = step_for$residuals) %>%
+  bf.test(residuals_ ~ group, data = ., verbose = FALSE)
+```
+
+檢定結果：檢定統計量$BF$為`r round(bf_$statistic, 4)`，p值為`r round(bf_$p.value, 4)`，小於顯著水準，因此我們拒絕$H_0$，也就是說我們有充分證據支持殘差不具備變異同質性，未通過變異同質性假設。
+
+- 以Durbin-Waston檢定檢驗殘差獨立性（令顯著水準為$0.05$）
+
+$$H_0: \epsilon_{i}\ are\ independent.\ v.s.\ H_1: \epsilon_{i}\ are\ not\ independent.$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(lmtest)
+dwtest_ <- dwtest(step_for)
+```
+
+檢定結果如下：檢定統計量$DW$為`r round(dwtest_$statistic, 4)`，p值為`r round(dwtest_$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備獨立性，通過獨立假設。
+
+## 依據類別變項分開建立迴歸模型
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(rstatix)
+model_aov_tb <- anova_summary(aov(water81 ~ water80*retired, data = concord))
+model_aov_tb_new <- anova_summary(aov(water81 ~ water80*retired, data = concord_new))
+```
+
+我們以經由Box-Cox轉換的資料建立的線性迴歸模型仍未通過殘差常態檢驗，也未通過殘差變異數同質性檢驗，有可能是極端值造成影響。此外，先前模型並未納入「戶長是否退休（`retired`）」這個變項，然而此變項與其他變項可能對依變項有交互作用，因此我們以考慮交互作用的變異數分析檢驗。結果顯示`retired`與1980年家戶用水量（`water80`）（$F=$,`r round(model_aov_tb$F[3])`$p=$`r round(model_aov_tb$p[3])`）與經由Box-Cox轉換的家戶用水量有交互作用（$F=$,`r round(model_aov_tb_new$F[3])`$p=$`r round(model_aov_tb_new$p[3])`）。而我們使用轉換後的資料時，在逐步選擇時排除了`retired`，顯示有可能要將`retired`各類別拆開，分別建立迴歸模型。
+
+### 定義變數與模型
+
+- 定義變數
+
+    1. 令$Y'$為經Box-Cox轉換的`water81`（1981年家戶用水量）
+    2. 令$X'_{1}$為經Box-Cox轉換的`water80`（1980年家戶用水量）
+    3. 令$X'_{2}$為經Box-Cox轉換的`income`（1981年家戶收入）
+    4. 令$X_{3}$為`educat`（戶長教育程度）
+    5. 令$X'_{4}$為`peop81`（1981年夏季時家戶人數）
+    6. 令$X_{5}$為`retired`（戶長是否退休），是=1，否=0。
+    
+- 定義模型
+
+    - 模型A - 針對戶長非退休之家戶建立的模型（$X_{i5}=0$）：$Y'_i = \beta_{0.0}' + \beta_{1.0}'X'_{i1} + \beta_{2.0}'X'_{i2} + \beta_{3.0}'X_{i3} + \beta_{4.0}'X_{i4} + \epsilon_i',\ \forall i = 1, ..., 350$
+    
+    - 模型B - 針對戶長已退休之家戶建立的模型（$X_{i5}=1$）：$Y'_j = \beta_{0.1}' + \beta_{1.1}'X'_{j1} + \beta_{2.1}'X'_{j2} + \beta_{3.1}'X_{j3} + \beta_{4.1}'X_{j4} + \epsilon_j',\ \forall j = 1, ..., 146$
+
+其中$\epsilon_i' \overset{iid} \sim N(0,{\sigma_i'}^2)$，$\epsilon_j' \overset{iid} \sim N(0,{\sigma_j'}^2)$。
+
+#### 檢查共線性
+
+在配適模型前，我們同樣以VIF值來檢查是否共線性存在。我們4個獨變項的VIF值如下表所示，在兩模型中均不具共線性。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+#model_full_0 <- lm(water81 ~ water80 + income + educat + peop81,
+#                   data = concord_new[-removed_rows,][concord_new[-removed_rows,]$retired == 0,])
+#model_full_1 <- lm(water81 ~ water80 + income + educat + peop81,
+#                   data = concord_new[-removed_rows,][concord_new[-removed_rows,]$retired == 1,])
+model_full_0 <- lm(water81 ~ water80 + income + educat + peop81,
+                   data = concord_new[concord_new$retired == 0,])
+model_full_1 <- lm(water81 ~ water80 + income + educat + peop81,
+                   data = concord_new[concord_new$retired == 1,])
+viff <- vif(model_full_0)
+df_vif <- data.frame(變項 = names(viff),
+                     模型A之VIF值 = viff,
+                     模型B之VIF值 = vif(model_full_1))
+rownames(df_vif) <- NULL
+knitr::kable(df_vif)
+```
+
+#### 逐步迴歸分析
+
+我們同樣使用向前選擇法，逐步納入對模型貢獻程度最高的變項，直到模型配適度不再改善。我們同樣以AIC作為模型配適度指標，$AIC$越大表示模型配適越差。下兩表分別列出了我們在模型A與模型B進行逐步選擇的過程，其中「$+X$」意味著在上一步驟的模型中再納入變項$X$。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+#model_null_0 <- lm(water81 ~ 1, data = concord_new[-removed_rows,][concord_new[-removed_rows,]$retired == 0,])
+#model_null_1 <- lm(water81 ~ 1, data = concord_new[-removed_rows,][concord_new[-removed_rows,]$retired == 1,])
+model_null_0 <- lm(water81 ~ 1, data = concord_new[concord_new$retired == 0,])
+model_null_1 <- lm(water81 ~ 1, data = concord_new[concord_new$retired == 1,])
+step_for_0 <- step(model_null_0, scope = list(upper = model_full_0), direction = 'for', trace = 0)
+step_for_1 <- step(model_null_1, scope = list(upper = model_full_1), direction = 'for', trace = 0)
+
+df <- step_for_0$anova[,c(1,6)] 
+df <- df %>% mutate(步驟編號 = 1:nrow(df)) %>%
+  dplyr::select(步驟編號, Step, AIC)
+df$Step[1] <- '不考慮任何變項的原始模型'
+colnames(df) <- c('步驟編號', '步驟', '步驟完成後的模型AIC')
+knitr::kable(df)
+
+df <- step_for_1$anova[,c(1,6)] 
+df <- df %>% mutate(步驟編號 = 1:nrow(df)) %>%
+  dplyr::select(步驟編號, Step, AIC)
+df$Step[1] <- '不考慮任何變項的原始模型'
+colnames(df) <- c('步驟編號', '步驟', '步驟完成後的模型AIC')
+knitr::kable(df)
+```
+
+經過變數挑選後，模型A（針對戶長非退休之家戶建立的模型）納入的獨變項有：$X'_{1}$（經Box-Cox轉換的`water80`）、$X'_{2}$（經Box-Cox轉換的`income`）、$X_{3}$（`educat`）與$X'_{4}$（經Box-Cox轉換的`peop81`）；模型B（針對戶長已退休之家戶建立的模型）納入的獨變項有：$X'_{1}$（經Box-Cox轉換的`water80`）、$X'_{2}$（經Box-Cox轉換的`income`與$X'_{4}$（經Box-Cox轉換的`peop81`）。
+
+### 迴歸係數之t檢定
+
+在假設\(\epsilon_i' \overset{iid} \sim N(0, {\sigma_i'}^2)\)成立的情況下，我們可以單樣本t檢定對每個迴歸係數$\beta$檢定其是否顯著不為零。所有檢定中我們都令顯著水準為$0.05$。
+
+- 研究假設
+    
+$$H_0: \beta'_{k.0} = 0,\ v.s. H_1: \beta'_{k.0} \neq 0,\ \forall k = 1,2,3,4$$
+
+$$H_0: \beta'_{k.1} = 0,\ v.s. H_1: \beta'_{k.1} \neq 0,\ \forall k = 1,2,4$$
+
+- 檢定統計量：
+
+\[T_{k.0} = \frac{\hat{\beta}_{k.0}'}{\sqrt{\hat{Var}(\beta_{k.0}')}} \sim t(n-K_0-1)\]
+
+\[T_{k.1} = \frac{\hat{\beta}_{k.1}'}{\sqrt{\hat{Var}(\beta_{k.1}')}} \sim t(n-K_1-1)\]
+
+- 模型A（針對戶長非退休之家戶建立的模型）的檢定結果：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sum_tb <- summ(step_for_0, confint = TRUE)
+df_ <- sum_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+df_ <- df_[c(1,2,4,5,3),]
+colnames(df_) <- c('估計值', '95CI下界', '.95CI上界', 't檢定統計量', 'p值')
+S <- rownames(df_)
+rownames(df_) <- paste0(c('截距', S[-1]), ' (beta_', c(0:4), '.0)')
+knitr::kable(df_)
+```
+
+針對各係數的t檢定結果如上表。檢定$\beta_{1.0}'$、$\beta_{2.0}'$與$\beta_{4.0}'$得到的t統計量之p值都小於顯著水準，因此我們在這三個檢定中可以拒絕$H_0$，顯示我們有充分證據可以宣稱對於戶長非退休之家戶，「經由Box-Cox轉換的1980年用水量」、「經由Box-Cox轉換的1981年收入」與「經由Box-Cox轉換的1981年人數」對於「經由Box-Cox轉換的1981年用水量」都有顯著的預測力。
+
+- 模型B（針對戶長已退休之家戶建立的模型）的檢定結果：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sum_tb <- summ(step_for_1, confint = TRUE)
+df_ <- sum_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+df_ <- df_[c(1,2,4,3),]
+colnames(df_) <- c('估計值', '.95CI下界', '.95CI上界', 't檢定統計量', 'p值')
+S <- rownames(df_)
+rownames(df_) <- paste0(c('截距', S[-1]), ' (beta_', c(0,1,2,4), ')')
+knitr::kable(df_)
+```
+
+針對各係數的t檢定結果如上表。檢定$\beta'_{1.1}$與$\beta'_{4.1}$得到的t統計量之p值都小於顯著水準，因此我們在這三個檢定中可以拒絕$H_0$，顯示我們有充分證據可以宣稱對於戶長已退休之家戶，「經由Box-Cox轉換的1980年用水量」與「經由Box-Cox轉換的1981年人數」對於「經由Box-Cox轉換的1981年用水量」都有顯著的預測力。
+
+#### 模型診斷
+
+配適迴歸模型之後，我們應對殘差做檢定來確認線性迴歸模型中的前提假設$\epsilon_i' \overset{iid} \sim N(0,{\sigma_i'}^2)$與$\epsilon_j' \overset{iid} \sim N(0,{\sigma_j'}^2)$是否滿足，包含殘差常態性、殘差變異數同質與殘差獨立性。
+
+- 針對模型A（針對戶長非退休之家戶建立的模型）繪製殘差圖以觀察殘差樣態
+
+由左上及右上兩圖可以發現，殘差期望值相相當接近0，不過殘差變異數似乎有變化趨勢。左下的常態Q-Q圖中資料點在值偏小處偏離45度線，顯示殘差可能不服從常態分配。右下圖顯示資料中無槓桿點。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=5}
+model_0 <- lm(water81 ~ water80 + income + peop81, data = concord_new[concord_new$retired == 0,])
+par(mfcol = c(2, 2))
+plot(model_0)
+```
+
+- 針對模型B（針對戶長已退休之家戶建立的模型）繪製殘差圖以觀察殘差樣態
+
+由左上及右上兩圖可以發現，殘差期望值相相當接近0，不過殘差變異數似乎有變化趨勢。左下的常態Q-Q圖中資料點在值偏小及偏大處非常明顯偏離45度線，顯示殘差可能不服從常態分配。右下圖顯示資料中無槓桿點。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=5}
+model_1 <- lm(water81 ~ water80 + peop81, data = concord_new[concord_new$retired == 1,])
+par(mfcol = c(2, 2))
+plot(model_1)
+```
+
+- 殘差常態性檢驗
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sw_test_0 <- shapiro.test(model_0$residuals)
+#ks_test_0 <- ks.test(model_0$residuals, rnorm(100))
+sw_test_1 <- shapiro.test(model_1$residuals)
+#ks_test_1 <- ks.test(model_1$residuals, rnorm(100))
+```
+
+我們以Shapiro-Wilk檢定檢驗模型殘差是否為常態分配，令顯著水準為$0.05$，其假設如下:
+
+$$H_0: \epsilon_i' \sim ND\ v.s.\ H_1: \epsilon_i'\ does\ not \sim ND$$
+$$H_0: \epsilon_j' \sim ND\ v.s.\ H_1: \epsilon_j'\ does\ not \sim ND$$
+
+模型A的檢定結果：檢定統計量$W$為`r round(sw_test_0$statistic, 4)`，p值為`r round(sw_test_0$p.value,4)`，小於顯著水準，因此我們拒絕$H_0$，表示我們有足夠的證據顯示殘差不服從常態分配，診斷未通過。模型B的檢定結果：檢定統計量$W$為`r round(sw_test_1$statistic, 4)`，p值為`r round(sw_test_1$p.value,4)`，小於顯著水準，因此我們拒絕$H_0$，表示我們有足夠的證據顯示殘差不服從常態分配，診斷未通過。
+
+- 以Brown-Forsythe檢定檢驗殘差變異同質性（令顯著水準為$0.05$）
+
+$$\begin{cases} H_{0}: \sigma_i'^2 = \sigma_{i'}'^2\ \forall i \neq i' \\ H_{1}:Not\ H_0\end{cases}$$
+$$\begin{cases} H_{0}: \sigma_j'^2 = \sigma_{j'}'^2\ \forall j \neq j' \\ H_{1}:Not\ H_0\end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+bf_0 <- concord_new %>% dplyr::filter(retired == 0) %>%
+  mutate(group = as.factor(water81 > median(water81)), residuals_ = model_0$residuals) %>%
+  bf.test(residuals_ ~ group, data = ., verbose = FALSE)
+
+bf_1 <- concord_new %>% dplyr::filter(retired == 1) %>%
+  mutate(group = as.factor(water81 > median(water81)), residuals_ = model_1$residuals) %>%
+  bf.test(residuals_ ~ group, data = ., verbose = FALSE)
+```
+
+模型A的檢定結果：檢定統計量$BF$為`r round(bf_0$statistic, 4)`，p值為`r round(bf_0$p.value,4)`，小於顯著水準，因此我們拒絕$H_0$，表示我們有足夠的證據顯示殘差不具備變異數同質性，診斷未通過。模型B的檢定結果：檢定統計量$BF$為`r round(bf_1$statistic, 4)`，p值為`r round(bf_1$p.value,4)`，小於顯著水準，因此我們拒絕$H_0$，表示我們有足夠的證據顯示殘差不具備變異數同質性，診斷未通過。
+
+- 以Durbin-Waston檢定檢驗殘差獨立性（令顯著水準為$0.05$）
+
+$$H_0: \epsilon_{i}'\ are\ independent.\ v.s.\ H_1: \epsilon_{i}'\ are\ not\ independent.$$
+$$H_0: \epsilon_{j}'\ are\ independent.\ v.s.\ H_1: \epsilon_{j}'\ are\ not\ independent.$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+dwtest_0 <- dwtest(model_0)
+dwtest_1 <- dwtest(model_1)
+```
+
+模型A的檢定結果：檢定統計量$DW$為`r round(dwtest_0$statistic, 4)`，p值為`r round(dwtest_0$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備獨立性，通過獨立假設。模型B的檢定結果：檢定統計量$DW$為`r round(dwtest_1$statistic, 4)`，p值為`r round(dwtest_1$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備獨立性，通過獨立假設。
+
+## 結論
+
+我們建立若干個迴歸模型以嘗試預測家戶用水量及解釋其變異性，模型的解釋力可由經自由度調整後的決定係數$R_{adj}^2$敘述，數學式如下：
+
+$$R^2 = 1 - \frac{SS_E / (n - K)}{SS_T / (n-1)}$$
+其中$SS_E$為模型無法解釋之變異，$SS_T$為總變異，$n$為樣本大小，$K$為最後納入模型的獨變項個數。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+coef_ <- round(step_for$coefficients, 4)
+coef_0 <- round(model_0$coefficients, 4)
+coef_1 <- round(model_1$coefficients, 4)
+```
+
+我們建立的其中一個模型為以Box-Cox轉換的家戶相關特徵預測「經由Box-Cox轉換的1981年家戶用水量」的複迴歸模型：
+
+\[ \hat{y}' = \hat{\beta_0'} + \hat{\beta_1'}x_{1} + \hat{\beta_2'}x_{2} + \hat{\beta_4'}x_{4} \]
+
+其中\(\hat{\beta_0}=\) `r round(step_for$coefficients['(Intercept)'], 4)`，\(\hat{\beta}_1=\) `r round(step_for$coefficients['water80'], 4)`，\(\hat{\beta}_2=\) `r round(step_for$coefficients['income'], 4)`，\(\hat{\beta}_4=\) `r round(step_for$coefficients['peop81'], 4)`。此迴歸模型之$R_{adj}^2 = 0.7101$，顯示大部分的變異可以被此模型解釋。由於我們採用的Box-Cox轉換是單調函數，因此轉換後效果方向仍相同。由迴歸係數可知，在固定其餘獨變項下，家戶在1980年經Box-Cox轉換的用水量每多1立方英尺，其在1981年經由Box-Cox轉換的用水量便多`r coef_['water80']`立方英尺（1980年用水量上升，1981年用水量上升）；家戶在1981年的收入每多1000元，其在1981年經由Box-Cox轉換的用水量便多`r coef_['income']`立方英尺（1981年收入上升，1981年用水量上升）；家戶在1981年的人數每多1人，其在1981年經由Box-Cox轉換的用水量便多`r coef_['peop81']`立方英尺（1981年家戶人數上升，1981年用水量上升）。
+
+我們也將家戶依據其戶長是否退休分層，分別針對戶長非退休以及戶長已退休的家戶各建立一個預測「經由Box-Cox轉換的1981年家戶用水量」的複迴歸模型：
+
+- 針對戶長非退休之家戶：\( \hat{y}' = \hat{\beta'}_{0.0} + \hat{\beta'}_{1.0}x_{1} + \hat{\beta'}_{2.0}x_{2} + \hat{\beta'}_{4.0}x_{4} \)。
+
+其中\(\hat{\beta'}_{0.0}=\) `r round(model_0$coefficients['(Intercept)'], 4)`，\(\hat{\beta'}_{1.0}=\) `r round(model_0$coefficients['water80'], 4)`，\(\hat{\beta'}_{2.0}=\) `r round(model_0$coefficients['income'], 4)`，\(\hat{\beta'}_{4.0}=\) `r round(model_0$coefficients['peop81'], 4)`此迴歸模型之$R_{adj}^2 = 0.6396$，顯示超過一半的變異可以被此模型解釋。由於我們採用的Box-Cox轉換是單調函數，因此轉換後效果方向仍相同。由迴歸係數可知，在固定其餘獨變項下，戶長非退休的家戶在1980年經Box-Cox轉換的用水量每多1立方英尺，其在1981年經由Box-Cox轉換的用水量便多`r coef_0['water80']`立方英尺（1980年用水量上升，1981年用水量變上升）；在1981年的收入每多1000元，其在1981年經由Box-Cox轉換的用水量便多`r coef_0['income']`立方英尺（1981年收入上升，1981年用水量上升）；在1981年的人數每多1人，其在1981年經由Box-Cox轉換的用水量便多`r coef_0['peop81']`立方英尺（1981年家戶人數上升，1981年用水量上升）。
+
+- 針對戶長已退休之家戶：\( \hat{y}' = \hat{\beta'}_{0.1} + \hat{\beta'}_{1.1}x_{2} + \hat{\beta'}_{4.1}x_{4} \)
+
+其中\(\hat{\beta'}_{0.1}=\) `r round(model_1$coefficients['(Intercept)'], 4)`，\(\hat{\beta'}_{1.1}=\) `r round(model_1$coefficients['water80'], 4)`，\(\hat{\beta'}_{4.0}=\) `r round(model_1$coefficients['peop81'], 4)`此迴歸模型之$R_{adj}^2 = 0.7444$，顯示超過一半的變異可以被此模型解釋。由於我們採用的Box-Cox轉換是單調函數，因此轉換後效果方向仍相同。由迴歸係數可知，在固定其餘獨變項下，戶長已退休的家戶在1980年經Box-Cox轉換的用水量每多1立方英尺，其在1981年經由Box-Cox轉換的用水量便多`r coef_1['water80']`立方英尺（1980年用水量上升，1981年用水量上升）；在1981年的人數每多1人，其在1981年經由Box-Cox轉換的用水量便多`r coef_1['peop81']`立方英尺（1981年家戶人數上升，1981年用水量上升升）。
+
+然而需要注意，這三個模型在殘差假設檢驗中，都僅通過了殘差獨立性檢定，並未通過常態性與變異數同質性的檢定。
+
+## 建議
+
+在模型篩選的過程中，我們嘗試了許多資料轉換方式與模型，不管是考慮交互作用項或考慮多項式迴歸（例如因直觀上家戶人數對用水量的效果應明顯，而新增「家戶人數的平方」，以強調人數的效果）等方法，都無法使得模型通過所有假設檢驗，也無明顯提高對資料的解釋能力。
+
+這顯示這份資料可能不適合使用線性迴歸分析，若諮詢者主要目的為得到精準的預測模型，建議可以改採其他前提假設不同於線性迴歸模型的機器學習模型，若諮詢者主要目的為解釋各獨變項如果對依變項產生效果，則可能還有沒有收集到的其他變項與依變項有關，建議可以多增加相關的變項以做分析，例如：家戶用水習慣（習慣淋浴或泡澡、是否開伙、洗衣習慣、是否裝設私人游泳池）、家戶房屋大小、家戶浴室個數等等。此外也可以確認資料收集方式之適當性，例如家戶人數若是以戶籍資料取得，則可能與家戶實際居住人數有出入。
+
+而就以目前的資料及分析結果而言，若要制定節水措施，建議可依據戶長是否退休否進行不同政策的擬定。
+
+# Exercise 12.6
+
+## 研究問題
+
+舉辦於鹽城湖市的2002年冬季奧運中的溜冰賽事因計分引發爭議。該溜冰賽由9位評審評分，主要分為「技術」與「表現」兩個面向。研究問題為分析評審在這兩個面向上的評分是否具有一致性，並做進一步的分析。
+
+## 資料介紹
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+data('skateslc')
+```
+
+資料集有`r nrow(skateslc)`列、`r ncol(skateslc)`個變項，每一列為一位溜冰選手獲得一位評審評分的紀錄，變項說明如下：
+
+- `Technique`: 評審給予選手的技術分數
+
+- `Presentation`: 評審給予選手的表現分數
+
+- `Judge`: 評審編號，共有9位評審
+
+- `Skater`: 溜冰選手，有Hughes、Slutskaya、Kwan、Cohen與Suguri等5位
+
+- 新增變項`Total.score`：`Technique`與`Presentation`之和，為評審給予選手的總分
+
+## 資料探索
+
+我們先以盒鬚圖來大致看各位評審給分的分佈。由圖可看出評審1給分偏低，而評審3給分偏高，評審2與評審4總分給分變異範圍較大。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=3.5}
+skateslc_ <- skateslc %>% 
+  mutate(Total.score = Technique + Presentation,
+         Judge = as.factor(Judge))
+skateslc_long  <- skateslc_ %>%
+  reshape2::melt(id.var = c('Judge', 'Skater'))
+
+library(showtext)
+showtext.auto(enable = TRUE)
+
+boxplot(value ~ Judge, data = skateslc_long,
+        main = '各評審給分盒鬚圖',
+        xlab = '評審編號', ylab = '分數',
+        family = '蘋方-繁 標準體')
+```
+
+```{r, comment='', message=FALSE, warning=FALSE, include=FALSE}
+ggplot(aes(x = Judge, y = value), data = skateslc_long) + 
+  geom_boxplot() +
+  #facet_wrap(variable ~ .) +
+  xlab('評審編號') + ylab('分數') +
+  ggtitle('各評審給分盒鬚圖') +
+  theme_bw() +
+  theme(text = element_text(family = '蘋方-繁 標準體'),
+        legend.position = 'none')
+
+qplot(x = Skater, y = value, #col = factor(Skater),
+      geom = 'boxplot', data = skateslc_long) + 
+  #facet_wrap(variable ~ ., nrow = 1) +
+  labs(x = '溜冰選手名字', y = '分數') +
+  ggtitle('各溜冰選手得分盒鬚圖') +
+  theme_bw() +
+  theme(text = element_text(family = '蘋方-繁 標準體'),
+        axis.text.x = element_text(angle = 45, hjust = .9),
+        legend.position = 'none')
+```
+
+我們接著以盒鬚圖來大致看各選手得分的分佈。由圖可看出Suguri得分偏低，而Kwan與Cohen都有獲得較極端的分數（某幾位評審給他們的評分明顯低或高於其他評審給他們的分數）。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=3.5}
+boxplot(value ~ Skater, data = skateslc_long,
+        main = '各選手得分盒鬚圖',
+        xlab = '溜冰選手名字', ylab = '分數',
+        family = '蘋方-繁 標準體')
+```
+
+接著，我們將評審、選手與總分三個變項都繪製在一起，來觀察交互作用是否可能存在。由於兩獨變量都是名義尺度的類別變項，我們不繪製折線圖，而繪製以顏色軸表徵依變項的點圖，圖中各點顏色表示評審給予選手的總分高低，顏色越靠近黃色者表示總分越高，而顏色越靠近紫色者則表示總分越低。可以發現，評審2與評審4給分不低，其給予Suguri選手的總分卻特別低，在Suguri選手獲得的9個總分中也屬於偏低者，這顯示評審與選手之間對於總分的交互作用可能存在。不過因為各交互作用組合都只有一個資料點，無法考慮交互作用
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+qplot(y= Skater, x = Judge,
+      col = Total.score, size = 5,
+      geom = 'point',
+      data = skateslc_) + 
+  scale_color_continuous(type = 'viridis') +
+  labs(y = '溜冰選手名字', x = '評審編號', colour = '總分') +
+  ggtitle('各評審給予各溜冰選手總分點圖') +
+  theme_bw() +
+  theme(text = element_text(family = '蘋方-繁 標準體')) +
+  guides(size = FALSE)
+```
+
+## 變異數分析
+
+我們以不考慮交互作用項、隨機區集化設計的的二因子變異數分析（two-way analysis of variance with random block design, two-way ANVOA RBD）回答研究問題。
+
+### 定義模型
+
+$$Y_{ij} = \mu + \alpha_i + \beta_j + \epsilon_{ij},\quad \epsilon_{ij} \overset{iid}\sim N(0, \sigma_{ij}^2)$$
+
+$$\sum_{i=1}^9 \alpha_i = \sum_{j=1}^5 \beta_i = 0;\quad \begin{cases} i = 1, ..., 9 \\ j = 1, ..., 5\end{cases}$$
+其中$Y_{ij}$為評審i給予選手j的總分，$\mu$為所有評審給予所有選手總分之總平均，$\alpha_i$為評審i對於總分的效果（處理效果，treatment effect），$\beta_i$為選手j對於總分的效果（集區效果，block effect），$\epsilon_{ij}$為評審i與選手j之誤差項。
+
+### 檢查分析的前提假設
+
+1. 獨變項之間彼此獨立
+
+評審與評審之間評分互相獨立，選手得分之間也互相獨立。符合。
+
+2. 變異數同質性假設
+
+我們對兩獨變項進行Levene檢定，顯著水準皆設定為$0.05$，檢定假設如下：
+
+$$\begin{cases} H_0: \sigma_{1j}^2 = \sigma_{2j}^2 = ... = \sigma_{9j}^2\ v.s.\ H_1: Not\ H_0\\ H_0: \sigma_{i1}^2 = \sigma_{i2}^2 = ... = \sigma_{i5}^2\ v.s.\ H_1: Not\ H_0 \end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+leveneTest_i <- with(skateslc_, leveneTest(Total.score ~ factor(Judge)))
+leveneTest_j <- with(skateslc_, leveneTest(Total.score ~ Skater))
+df_levene <- data.frame(
+  因子 = c('Judge', 'Skater'),
+  `自由度1` = c(leveneTest_i$Df[1], leveneTest_j$Df[1]),
+  `自由度2` = c(leveneTest_i$Df[2], leveneTest_j$Df[2]),
+  `F檢定統計量` = round(c(leveneTest_i$`F value`[1], leveneTest_j$`F value`[1]), 4),
+  p值 = round(c(leveneTest_i$`Pr(>F)`[1], leveneTest_j$`Pr(>F)`[1]), 4)
+)
+knitr::kable(df_levene)
+```
+
+檢定結果如上表，兩個檢定的p值接不小於顯著水準，因此我們都不拒絕$H_0$，表示我們無足夠證據宣稱變異數同質性不存在，通過此前提假設。
+
+3. 殘差彼此獨立且服從相同的常態分配：待模型配適後再進行診斷。
+
+### 研究假設
+
+$$H_0: \alpha_1 = \alpha_2 = ... \alpha_9\ v.s.\ H_1: Not\ H_0$$
+
+$$H_0: \beta_1 = \beta_2 = ... \beta_5\ v.s.\ H_1: Not\ H_0$$
+
+### 檢定結果
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+model_1 <- aov(Total.score ~ Judge + Skater, data = skateslc_)
+model_1_tb <- anova_summary(model_1)
+df <- data.frame(
+  變異來源 = c('因子（評審）', '集區（選手）', '殘差'),
+  自由度 = c(8, 4, 32),
+  平方和 = c(44.58, 179.56, 49.64)
+)
+df$均方 = df$平方和 / df$自由度
+df$`F檢定統計量` = c(model_1_tb[,'F'], '')
+df$p值 = c(model_1_tb[,'p'], '')
+knitr::kable(df)
+```
+
+令顯著水準為$0.05$。ANOVA結果如上表。根據ANOVA，我們在兩組研究假設中都拒絕虛無假設，表示因子效果與集區效果都顯著，也就是說，不同評審給予的總分並不完全相同，不同選手得到的分數也並不完全相同。
+
+### 檢查殘差假設
+
+我們先繪製殘差圖觀察殘差分佈情形。由左上圖可知殘差期望值接近0，左下的常態Q-Q圖中資料點大多落在45度線上，顯示殘差可能服從常態分配，右下圖則顯示殘差變異性不大，變異數同質性可能存在。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=5}
+par(mfcol = c(2, 2))
+plot(model_1)
+par(mfcol = c(1, 1))
+```
+
+我們接著進行檢定以確認這些條件成立。所有檢定的顯著水準皆設為$0.05$。
+
+1. 殘差常態檢定
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sw_test <- shapiro.test(model_1$residuals)
+```
+
+我們以Shapiro-Wilk檢定檢驗模型殘差是否為常態分配，檢定假設如下:
+
+$$H_0: \epsilon_{ij} \sim ND\ v.s.\ H_1: \epsilon_{ij}\ does\ not \sim ND$$
+
+檢定結果：檢定統計量$W$為`r round(sw_test$statistic, 4)`，p值為`r round(sw_test$p.value,4)`，不小於顯著水準，因此我們1不拒絕$H_0$，表示我們沒有足夠的證據顯示殘差不服從常態分配，診斷通過。
+
+2. 殘差變異同質性檢驗
+
+在常態分佈下，以Barlett檢定變異同數同質性的統計檢定力較高，因此我們以其檢驗殘差變異數同質性，檢定假設與檢定結果如下：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+bartlett_i <- bartlett.test(Total.score ~ Judge, data = skateslc_)
+bartlett_j <- bartlett.test(Total.score ~ Skater, data = skateslc_)
+```
+
+- 檢定因子間殘差變異數同質性：
+$H_{0}: \sigma_{ij}^2 = \sigma_{i'j}^2\ \forall i \neq i'\quad v.s.\quad H_{1}:Not\ H_0$
+
+檢定統計量$Barlett's\ k^2$為`r round(bartlett_i$statistic, 4)`，其p值為`r round(bartlett_i$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，意味著沒有足夠的證據證明變異數同質性不存在。
+
+- 檢定集區間殘差變異數同質性：
+$H_{0}: \sigma_{ij}^2 = \sigma_{ij'}^2\ \forall j \neq j'\quad v.s.\quad H_{1}:Not\ H_0$
+
+檢定統計量$Barlett's\ k^2$為`r round(bartlett_j$statistic, 4)`，其p值為`r round(bartlett_j$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，意味著沒有足夠的證據證明變異數同質性不存在。
+
+- 以Brown-Forsythe Test檢定整體殘差變異數同質性：
+
+$H_{0}: \sigma_{ij}^2 = \sigma_{i'j'}^2\ \forall i \neq i',\ j \neq j'\quad v.s.\quad H_{1}:Not\ H_0$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+bf_ <- skateslc_ %>%
+  mutate(group = as.factor(Total.score > median(Total.score)),
+         residuals_ = model_1$residuals) %>%
+  bf.test(residuals_ ~ group, data = ., verbose = FALSE)
+```
+
+檢定結果：檢定統計量$BF$為`r round(bf_$statistic, 4)`，p值為`r round(bf_$p.value,4)`，小於顯著水準，因此我們拒絕$H_0$，表示我們有足夠的證據顯示殘差不具備變異數同質性。殘差變異數同質性之診斷未完全通過。
+
+3. 以Durbin-Waston檢定檢驗殘差獨立性
+
+$$H_0: \epsilon_{i}'\ are\ independent.\ v.s.\ H_1: \epsilon_{i}'\ are\ not\ independent.$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+dwtest_0 <- dwtest(model_0)
+dwtest_ <- dwtest(model_1)
+```
+
+檢定結果：檢定統計量$DW$為`r round(dwtest_$statistic, 4)`，p值為`r round(dwtest_$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備獨立性，通過獨立假設。
+
+## 結論
+
+藉由資料視覺化與隨機集區化設計的二因子變異數分析可以得知9位評審對溜冰選手的評分不具一致性。且另外也可得知5位選手間的表現有所差異。不過，需要注意，因為我們建立的模型無法通過診斷，而且ANOVA RBD無法刪除極端值， 因此以該檢定推論可能會有問題。
+
+## 建議
+
+因為我們建立的模型無法通過診斷，而且ANOVA RBD無法刪除極端值， 因此以該檢定推論可能會有問題，建議可改用前提假設較不嚴格的無母數分析，或是增加資料筆數，例如增加更多選手的紀錄，以提升分析可信度。

@@ -1,0 +1,563 @@
+---
+title: "統計諮詢 - 作業2"
+subtitle: "國立成功大學統計學系暨數據科學研究所"
+author: "廖傑恩（RE6094028）"
+date: "`r Sys.Date()`"
+geometry: margin = 1in
+fontsize: 12pt
+linestretch: 1.25
+documentclass: ctexart
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: no
+    keep_tex: yes
+classoption: "hyperref, a4paper"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = FALSE, fig.align = 'center')
+```
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(HH)
+```
+
+# Exercise 6.5
+
+## 問題敘述
+
+研究者想比較癌症病人在5種不同器官接受補充抗壞血酸（supplemental ascorbate）後的存活天數（Cameron \& Pauling, 1978; Hand et al., 1994）。這5種器官為：胃（Stomach）、支氣管（Bronchus）、結腸（Colon）、卵巢（Ovary）和乳房（Breast）。
+
+## 資料介紹
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+data(patient)
+```
+
+資料共有`r nrow(patient)`列、`r ncol(patient)`個變項，每一列為一名癌症病患的資料。變項說明如下：
+
+- `surv.time`：病患存活天數
+
+- `organ`：接受補充抗壞血酸的器官，有胃、支氣管、結腸、卵巢和乳房5種
+
+## Exercise 6.5 - (a)
+
+Perform a log transformation of the response days for each of the five levels of the factor site in order to improve conformity with the required assumption that the data be approximately normally distributed with equal within-site variance. Produce and compare box plots to compare the response before and after the transformation.
+
+### 繪製盒鬚圖
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+patient$log.surv.time <- log(patient$surv.time)
+par(mfcol = c(1, 2))
+boxplot(patient$surv.time, main = 'Boxplot of Survival Time (days)')
+boxplot(patient$log.surv.time, main = 'Boxplot of Logged\nSurvival Time')
+```
+
+由上兩個盒鬚圖（boxplot）可以發現到原始資料的分布很廣、變異性很大（請注意兩圖的y軸不同），而進行log轉換後的資料值皆小於10，變異性低了許多，資料較為集中。下圖將兩個盒鬚圖置於同一y軸來比較，可以看出很明顯的差異。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(dplyr)
+patient %>% dplyr::select(surv.time, log.surv.time) %>% stack() %>%
+  boxplot(values ~ ind, data = ., xlab = '', main = 'Boxplot of Survival Time and Logged Survival Time')
+```
+
+接著我們依據接受補充抗壞血酸的器官分開繪製病患存活天數的盒鬚圖。可以發現，在進行log轉換前，各組（不同器官）的存活天數都有特別大的值，而進行log轉換後，資料則明顯較為集中。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+boxplot(data = patient, surv.time ~ organ, ylab = 'Logged survival time (days)',
+        main = 'Boxplots of Survival Time (days)')
+boxplot(data = patient, log(surv.time) ~ organ, ylab = 'Logged survival time (days)',
+        main = 'Boxplots of Logged Survival Time')
+```
+
+### 常態檢定
+
+針對原始的存活天數資料（$Y$）與經過log轉換的存活天數資料（$Y'$）繪製Normal Q-Q plot（如下兩圖），可以發現$Y$的資料點明顯偏離45度線，而$Y'$的資料點則相當符合45度線。顯示$Y$可能不服從常態分配（Normal distribution, ND），而$Y'$則可能服從。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(pty = 's', mfcol= c(1, 2))
+qqnorm(patient$surv.time, main = 'Normal Q-Q Plot of\nSurvial Time (Y)')
+qqline(patient$surv.time, col = 'red')
+qqnorm(log(patient$surv.time), main = 'Normal Q-Q Plot of\nLogged Survial Time (Y\')', ylab = 'Logged Sample Quantile')
+qqline(log(patient$surv.time), col = 'red')
+```
+
+除了繪製Q-Q plot，我們以Shapiro-Wilk常態檢定法來檢定原始的存活天數資料（$Y$）是否服從常態分配，假設如下：
+
+$$\begin{cases} H_0: Y \sim ND \\ H_1: Y\ does\ not \sim ND \end{cases}$$
+
+令顯著水準$\alpha$為$0.05$，意味著我們進行此檢定犯下型一錯誤（type I error, 當$H_0$為真時拒絕$H_0$）的機率為$0.05$。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+shapiro_test_origin <- shapiro.test(patient$surv.time)
+shapiro_test_log <- shapiro.test(patient$log.surv.time)
+```
+
+檢定結果如下：檢定統計量$W$為`r round(shapiro_test_origin$statistic, 4)`，p值為`r shapiro_test_origin$p.value`，小於顯著水準，因此我們拒絕$H_0$。在$1-\alpha=95\%$的信心水準下，我們認為樣本並不服從常態分配。
+
+我們同樣以Shapiro-Wilk法來檢定經過log轉換的存活天數資料（$Y'$）是否服從常態分配，假設如下：
+
+$$\begin{cases} H_0: Y' \sim ND \\ H_1: Y'\ does\ not \sim ND \end{cases}$$
+
+令顯著水準$\alpha$為0.05。檢定結果如下：檢定統計量$W$為`r round(shapiro_test_log$statistic, 4)`，p值為`r round(shapiro_test_log$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$。在$1-\alpha=95\%$的信心水準下，我們並沒有充分的證據認為樣本不服從常態分配。
+
+## Exercise 6.5 - (b)
+
+Perform an analysis to assess differences in mean survival between the different cancer sites.
+
+### 研究問題
+
+研究問題：不同癌症發生位置（接補充抗壞血酸的器官受）的平均存活天數是否有所差異。令$\mu_{x}$為某癌症發生位置存活天數的母體平均數，$x = Stomach,\ Bronchus,\ Colon,\ Ovary,\ or\ Breast$，研究假說如下：
+
+$$\begin{cases} H_0: \mu_{Stomach} = \mu_{Bronchus} = \mu_{Colon} = \mu_{Ovary} = \mu_{Breast} \\ H_1: Not\ H_0\ (At\ least\ one\ pair\ (x,x')\ s.t.\ \mu_x \neq \mu_{x'}),\ where\ x \neq x' \end{cases}$$
+
+### 資料分析：ANOVA
+
+我們以單因子變異數分析（one-way ANOVA）來回答這個研究問題。
+
+#### 檢驗分析的前提假設是否滿足
+
+One-way ANOVA有若干前提假設（assumption），在進行檢驗之前，我們先檢查資料是否符合這些假設。
+
+1. 獨變項須為類別變數（categorical variable），依變項必須是連續變數（continuous variable）
+
+此分析獨變項為接受補充抗壞血酸的器官，為含有5個類別的類別變數；依變項為病患存活天數（$Y$），為連續變項。符合。若將依變項進行log轉換形成（$Y'$），仍為連續變項，此前提仍符合。
+
+2. 各組樣本依變項獨立
+
+此分析中，各組依變項為(1)在胃接受補充抗壞血酸者的存活天數（或進行log轉換的存活天數）、(2)在支氣管接受補充抗壞血酸者的存活天數（或進行log轉換的存活天數）、(3)在結腸接受補充抗壞血酸者的存活天數（或進行log轉換的存活天數）、(4)在卵巢接受補充抗壞血酸者的存活天數（或進行log轉換的存活天數）與(5)在乳房接受補充抗壞血酸者的存活天數（或進行log轉換的存活天數）。不論是否進行log轉換，這五者都互不影響彼此，都符合前提假設。
+
+3. 若要進行事後多重比較，依變項母體必須服從常態分佈（Normal Distribution, ND）
+
+在前面 `Exercise 6.5 - (a)`時，我們已知當令顯著水準（significant level）為$0.05$，我們有充分證據支持依變項$Y$分配不服從常態分佈，而沒有充分證據支持經log轉換的依變項$Y'$分配不服從常態分佈。$Y'$通過此前提假設，為了有機會進行事後多重比較，以下的檢驗與分析以$Y'$進行。
+
+4. 變異數同質（homogeneity of variance）：各組依變項的變異數必須相等。
+
+我們以Levene 檢定檢定檢驗變異數同質是否成立。令$\sigma_x^2$為在x器官接受補充抗壞血酸者經log轉換存活天數的母體變異數，研究假說如下，並令顯著水準（significant level）為$0.05$。
+
+$$\begin{cases} H_{0}: \sigma_{Stomach}^2 = \sigma_{Bronchus}^2 = \sigma_{Colon}^2=  \sigma_{Ovary}^2= \sigma_{Breast}^2\\ H_{1}:Not\ H_0\ (At\ least\ one\ pair\ (x,x')\ s.t. \sigma_x^2 \neq \sigma_{x'}^2),\ where\ x \neq x' \end{cases}$$
+
+檢定統計量為$W$，服從自由度為$k-1$與$N-k$的F分配，如下式：
+
+$$W = \frac{(N-k)\sum_{i=1}^k n_i(\bar{Z}_{i.} \bar{Z})}{(k-1)\sum_{i=1}^k\sum_{j=1}^{n_i}(Z_{ij} \bar{Z}_{i.})} \sim F(k-1, N-k)$$
+其中$N = \sum_{i=1}^kn_i$為總樣本數，$Z_{ij} = |Y_{ij} - \bar{Y_{i.}}|$，$\bar{Y_{i.}} = \frac{1}{n}\sum_{j=1}^{n_j}Y_{ij}$，$\bar{Z_{i.}} = \frac{1}{n_{i.}}\sum_{j=1}^{n_i}Z_{ij}$，$\bar{Z} = \frac{1}{N}\sum_{i=1}^k\sum_{j=1}^{n_i}Z_{ij}$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(lawstat)
+levene_test <- levene.test(log(patient$surv.time), patient$organ) 
+```
+
+檢定結果的檢定統計量$W$為`r round(levene_test$statistic, 4)`，其p值為`r round(levene_test$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，意味著我們沒有足夠的證據證明變異數同質性不存在，也就是說我們無法證明至少有一組母體變異數與其他組不同，通過此前提假設。
+
+在常態性成立的情況下，Bartlett是變異數同質性檢定法中統計檢定力（power）較高者。我們再以Bartlett檢定檢驗變異數同質是否成立。研究假說同上，我們同樣令顯著水準為$0.05$。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+bartlett_test <- bartlett.test(log(surv.time) ~ organ, data = patient)
+```
+
+檢定結果的檢定統計量$Barlett's\ k^2$為`r round(bartlett_test$statistic, 4)`，其p值為`r round(bartlett_test$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，意味著我們沒有足夠的證據證明變異數同質性不存在，也就是說我們無法證明至少有一組母體變異數與其他組不同，通過此前提假設。
+
+5. 殘差（residuals）服從常態分配。
+
+待配適完模型後診斷。 <br/> <br/>
+
+以上步驟1-4顯示，在我們的資料中，以經log轉換的存活天數（$Y'$）為依變項，ANOVA的前提假設均滿足，因此我們可以進行ANOVA。
+
+#### 檢定統計量與檢定結果
+
+One-way ANOVA的檢定統計量為$F$值，其服從自由度為$k-1$與$N-k$的F分配，數學式如下：
+
+$$F_{TS} = \frac{explained\ variation}{unexplained\ variation} = \frac{\sum_{j=1}^k n_j (\bar{Y'_j} - \bar{Y'}) / (k-1)}{\sum_{j=1}^k \sum_{i=1}^{n_j} (Y'_{ji} - \bar{Y'_j})^2 / (N-k)} \sim F(k-1, N-k)$$
+其中，$k$為獨變項組別數；$n_j$為第$j$組的觀察值（observations）個數；$N = \sum_{j=1}^k n_j$，也就是總觀察值數；$\bar{Y'_j}$為第j組依變項的樣本平均數，$\bar{Y'}$為依變項樣本平均數；$Y'_{ji}$為第j組的第i個依變項觀察值。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(rstatix)
+model_1 <- aov(log(surv.time) ~ organ, data = patient)
+anova_tb <- anova_summary(model_1)
+#model_1_ <- aov(surv.time ~ organ, data = patient)
+#anova_tb <- anova_summary(model_1_)
+#anova_tb
+```
+
+我們令顯著水準為$0.05$，檢定統計量$F_{TS}$為`r anova_tb$F`，p值為`r anova_tb$p`，小於顯著水準，因此我們可以拒絕$H_0$。
+
+最後我們檢查殘差項（$\epsilon$）是否滿足常態假設，研究假說如下：
+
+$$\begin{cases} H_0: \epsilon \sim ND \\ H_1: \epsilon\ does\ not \sim ND \end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+shapiro_test_ <- shapiro.test(model_1$residuals)
+```
+
+檢定結果如下：檢定統計量$W$為`r round(shapiro_test_$statistic, 4)`，p值為`r round(shapiro_test_$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差並不服從常態分配，通過常態假設。
+
+我們可以先前ANOVA檢定的結果得到結論：我們有足夠的證據支持「不同癌症發生位置（接受補充抗壞血酸的器官）的病患，其平均存活天數有所差異」。
+
+### 資料分析：事後多重比較
+
+目前的分析只能得到「不同癌症發生位置（接受補充抗壞血酸的器官）的病患，其平均存活天數有所差異」的結論，無法得知哪些接受補充抗壞血酸的病患平均存活天數比較低，如果想得知，必須接著進行事後多重比較，合適的檢定方法有Scheffé與Tukey HSD等。
+
+#### Tukey HSD檢定法
+
+我們以Tukey HSD來進行5個接受補充抗壞血酸器官，其logged存活天數的兩兩比較。檢定結果如下表所示，其中的「差異」為組別2平均數減去組別1平均數，所以負值表示組別1的平均數較大。Diff=兩組差異平均估計值；CI=confident interval；p.adj=經過Tukey方法校正的p值。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+df <- tukey_hsd(model_1)
+df <- df %>% dplyr::select(group1, group2, estimate, conf.low, conf.high, p.adj, p.adj.signif) %>%
+  mutate(estimate = round(estimate, 4), conf.low = round(conf.low,4), conf.high = round(conf.high,4), p.adj = round(p.adj,4))
+colnames(df) <- c('組別1', '組別2', 'Diff', '95%CI下界', '95%CI上界', 'p.adj', '是否顯著')
+df$是否顯著[df$是否顯著=='**'] <- '顯著'
+df$是否顯著[df$是否顯著=='*'] <- '顯著'
+df$是否顯著[df$是否顯著=='ns'] <- '不顯著'
+knitr::kable(df)
+```
+
+下圖則為Tukey HSD檢定結果的視覺化，縱軸有標示各組兩兩配對，橫軸則為兩組差異，若其信賴區間的bar沒有包含到0，則表示此對的兩組有顯著差異。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+hsd_1 <- TukeyHSD(model_1)
+par(mar = c(5.1, 8.1, 4.1, 1))
+plot(hsd_1, las=1 , col = 'blue')
+```
+
+根據Tukey HSD檢驗，在$95\%$信心水準下，我們可以得到以下結論：
+
+- 支氣管（bronchus）接受補充抗壞血酸的病患，其存活天數（經log轉換）顯著低於乳房（breast）接受補充抗壞血酸的病患。
+
+- 胃（stomach）接受補充抗壞血酸的病患，其存活天數（經log轉換）顯著低於乳房（breast）接受補充抗壞血酸的病患。
+
+- 其餘器官接受補充抗壞血酸的病患存活天數（經log轉換）之兩兩比較，皆沒有顯著差異。
+
+# Exercise 6.9
+
+Box等人（1978）想比較被餵食4種不同飲食（A, B, C, D）的動物的血，其凝結時間是否有所差異。
+
+## 資料介紹
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+data(blood, package = 'HH')
+```
+
+資料共有`r nrow(blood)`筆，每一筆為一單位的動物血，有`r ncol(blood)`個變項：
+
+1. `times`: 動物血凝結的時間（單位：秒）
+
+2. `diets`: 動物血取自哪種飲食種類的動物，有A、B、C與D這4種
+
+下兩圖為4種飲食種類的動物的血的凝結時間盒鬚圖，不同飲食種類的凝結時間似乎有差異。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+boxplot(times ~ diets, data = blood, ylab = 'Times (seconds)',
+        main = 'Box Plots of Coagulation Times of blood\nDrawn from Animals Fed Different Diets')
+```
+
+## 研究假設
+
+令$\mu_{x}$為以$x$飲食的動物的血的平均凝結時間（單位：秒），$x =A,B,C,or\ D$，研究假設如下：
+
+$$\begin{cases} H_0: \mu_A = \mu_B = \mu_C = \mu_D \\ H_1: Not\ H_0\ (At\ least\ one\ pair\ (x,x')\ s.t. \mu_x \neq \mu_{x'}),\ where\ x \neq x' \end{cases}$$
+
+## 資料分析：One-way ANOVA
+
+我們以單因子變異數分析（one-way ANOVA）來回答這個研究問題。
+
+### 檢驗分析的前提假設是否滿足
+
+One-way ANOVA有5個前提假設（assumption），在進行檢驗之前，我們先檢查資料是否符合這些假設。
+
+1. 獨變項須為類別變數（categorical variable），依變項必須是連續變數（continuous variable）
+
+此分析獨變項為飲食種類，為含有4個類別的類別變數；依變項為動物血，為連續變項。符合。
+
+2. 各組樣本依變項獨立
+
+四種飲食種類的動物的血的凝結時間都互不影響彼此，符合前提假設。
+
+3. 若要進行事後多重比較，依變項母體必須服從常態分佈（Normal Distribution, ND）
+
+針對動物血的凝結時間（$Y$）繪製Normal Q-Q plot（如下圖），可以發現資料點相當符合45度線。顯示$Y$可能服從常態分配（Normal distribution, ND）。
+
+<br/>
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(pty = 's')
+qqnorm(blood$times)
+qqline(blood$times, col = 'red')
+```
+
+除了繪製Normal Q-Q plot，我們以Shapiro-Wilk常態檢定法來檢定動物血的凝結時間（$Y$）是否服從常態分配，假設如下：
+
+$$\begin{cases} H_0: Y \sim ND \\ H_1: Y\ does\ not \sim ND \end{cases}$$
+
+令顯著水準$\alpha$為$0.05$，意味著我們進行此檢定犯下型一錯誤（type I error, 當$H_0$為真時拒絕$H_0$）的機率為$0.05$。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+shapiro_test_blood <- shapiro.test(blood$times)
+```
+
+檢定結果如下：檢定統計量$W$為`r round(shapiro_test_blood$statistic, 4)`，p值為`r round( shapiro_test_blood$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持$Y$不服從常態分配，通過常態假設。
+
+4. 變異數同質（homogeneity of variance）：各組依變項的變異數必須相等。
+
+檢定結果的檢定統計量$W$為`r round(levene_test$statistic, 4)`，其p值為`r round(levene_test$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，意味著我們沒有足夠的證據證明變異數同質性不存在，也就是說我們無法證明至少有一組母體變異數與其他組不同，通過此前提假設。
+
+我們以Levene與Bartlett檢定檢驗變異數同質是否成立。令$\sigma_x^2$為飲食種類為$x$的動物的血的凝結時間母體變異數，兩檢定的研究假說皆如下所示，顯著水準皆設定為$0.05$。
+
+$$\begin{cases} H_{0}: \sigma_A^2 = \sigma_B^2 = \sigma_C^2=  \sigma_D^2 \\ H_{1}:Not\ H_0\ (At\ least\ one\ pair\ (x,x')\ s.t. \sigma_x^2 \neq \sigma_{x'}^2),\ where\ x \neq x' \end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+levene_test_blood <- levene.test(blood$times, blood$diets) 
+```
+
+Levene的檢定統計量$W$為`r round(levene_test_blood$statistic, 4)`，其p值為`r round(levene_test_blood$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，意味著我們沒有足夠的證據證明變異數同質性不存在，也就是說我們無法證明至少有一組母體變異數與其他組不同，通過此前提假設。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+bartlett_test_blood <- bartlett.test(times ~ diets, data = blood)
+```
+
+檢定結果的檢定統計量$Barlett's\ k^2$為`r round(bartlett_test_blood$statistic, 4)`，其p值為`r round(bartlett_test_blood$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，意味著我們沒有足夠的證據證明變異數同質性不存在，也就是說我們無法證明至少有一組母體變異數與其他組不同，仍然通過此前提假設。
+
+5. 殘差（residuals）服從常態分配。
+
+待配適完模型後診斷。
+
+以上步驟1-4顯示，在我們的資料中，以動物血的凝結時間（$Y$）為依變項，ANOVA的前提假設均滿足，因此我們可以進行ANOVA。
+
+### 檢定統計量與檢定結果
+
+One-way ANOVA的檢定統計量為$F$值，其服從自由度為$k-1$與$N-k$的F分配，數學式如下：
+
+$$F_{TS} = \frac{explained\ variation}{unexplained\ variation} = \frac{\sum_{j=1}^k n_j (\bar{Y_j} - \bar{Y}) / (k-1)}{\sum_{j=1}^k \sum_{i=1}^{n_j} (Y_{ji} - \bar{Y_j})^2 / (N-k)} \sim F(k-1, N-k)$$
+其中，$k$為獨變項組別數；$n_j$為第$j$組的觀察值（observations）個數；$N = \sum_{j=1}^k n_j$，也就是總觀察值數；$\bar{Y_j}$為第j組依變項的樣本平均數，$\bar{Y}$為依變項樣本平均數；$Y_{ji}$為第j組的第i個依變項觀察值。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+model_2 <- aov(times ~ diets, data = blood)
+anova_tb <- anova_summary(model_2)
+```
+
+我們令顯著水準為$0.05$，檢定統計量$F_{TS}$為`r anova_tb$F`，p值為`r anova_tb$p`，小於顯著水準，因此我們可以拒絕$H_0$。最後我們檢查殘差項（$\epsilon$）是否滿足常態假設，令顯著水準為$0.05$，研究假說如下：
+
+$$\begin{cases} H_0: \epsilon \sim ND \\ H_1: \epsilon\ does\ not \sim ND \end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+shapiro_test_blood_ <- shapiro.test(model_2$residuals)
+```
+
+檢定結果如下：檢定統計量$W$為`r round(shapiro_test_blood_$statistic, 4)`，p值為`r shapiro_test_blood_$p.value`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差並不服從常態分配，通過常態假設。
+
+我們可以先前ANOVA檢定的結果得到結論：我們有足夠的證據支持「不同飲食種類的動物的血，其凝結時間有所差異」。
+
+### 資料分析：事後多重比較
+
+目前的分析只能得到「不同飲食種類的動物的血，其凝結時間有所差異」的結論，無法得知哪些飲食種類的動物的血凝結時間比較短或長，如果想得知，必須接著進行事後多重比較，合適的檢定方法有Scheffé與Tukey HSD等。
+
+#### Tukey HSD檢定法
+
+我們Tukey HSD來進行4個飲食種類的動物的血，其凝結時間的兩兩比較。檢定結果如下表所示，其中的「差異」為組別2平均數減去組別1平均數，所以負值表示組別1的平均數較大。Diff=兩組差異平均估計值；CI=confident interval；p.adj=經過Tukey方法校正的p值。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+df <- tukey_hsd(model_2)
+df <- df %>% dplyr::select(group1, group2, estimate, conf.low, conf.high, p.adj, p.adj.signif) %>%
+  mutate(estimate = round(estimate, 4), conf.low = round(conf.low,4), conf.high = round(conf.high,4), p.adj = round(p.adj,4))
+colnames(df) <- c('組別1', '組別2', 'Diff', '95%CI下界', '95%CI上界', 'p.adj', '是否顯著')
+df$是否顯著[df$是否顯著=='***'] <- '顯著'
+df$是否顯著[df$是否顯著=='**'] <- '顯著'
+df$是否顯著[df$是否顯著=='*'] <- '顯著'
+df$是否顯著[df$是否顯著=='ns'] <- '不顯著'
+knitr::kable(df)
+```
+
+下圖則為Tukey HSD檢定結果的視覺化，縱軸有標示各組兩兩配對，橫軸則為兩組差異，若其信賴區間的bar沒有包含到0，則表示此對的兩組有顯著差異。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=3.1}
+hsd_2 <- TukeyHSD(model_2)
+#par(mar = c(5.1, .1, 4.1, 1))
+plot(hsd_2, las=2 , col = 'blue')
+```
+
+根據Tukey HSD檢定，在$95\%$信心水準下，我們可以得到以下結論：
+
+- 飲食種類為B的動物的血，其凝結時間顯著大於飲食種類為A的動物的血。
+
+- 飲食種類為C的動物的血，其凝結時間顯著大於飲食種類為A的動物的血。
+
+- 飲食種類為D的動物的血，其凝結時間顯著小於飲食種類為B的動物的血。
+
+- 飲食種類為D的動物的血，其凝結時間顯著小於飲食種類為C的動物的血。
+
+- 飲食種類為A的動物的血以及飲食種類為D的動物的血，其凝結時間沒有顯著差異。
+
+- 飲食種類為B的動物的血以及飲食種類為C的動物的血，其凝結時間沒有顯著差異。
+
+也就是：
+
+$$\mu_B \simeq \mu_C > \mu_A \simeq \mu_D$$
+
+## 建議
+
+此資料中觀測值只有`r nrow(blood)`筆，某些飲食種類的觀測值個數也偏少，可以增加多一點觀測值，以增加分析結果的可信度。
+
+# Exercise 8.2
+
+Shaw（1942）以及Mosteller與Tukey（1977）等研究者紀錄了連續20年Lake Victoria Nyanza的相對水位與太陽黑子（sunspots）的個數。
+
+## 資料介紹
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+data(lake, package = 'HH')
+```
+
+資料共有`r nrow(lake)`筆，每一筆為一年的觀測紀錄，有`r ncol(lake)`個變項：
+
+- `level`: Lake Victoria Nyanza的相對水位
+
+- `sunspots`: 太陽黑子的個數
+
+下兩圖為兩變項的盒鬚圖，可以看出這兩個變項的分佈沒有非常分散，也沒有特別大或特別小的值。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(mfcol = c(1, 2))
+boxplot(lake$level, main = 'Box Plot of The Relative Level\nof Lake Victoria Nyanza')
+boxplot(lake$sunspots, main = 'Box Plot of Sunspots')
+# $$\begin{cases} H_0: \beta_1 = 0 \\ H_1: \beta_1 \neq 0 \end{cases}$$
+```
+
+## 研究問題
+
+以湖水水位為依變項（$Y$）、太陽黑子個數為獨變項（$X$），建立線性迴歸模型：
+
+$$Y_{ij} = \beta_0 + \beta_1X_i + \epsilon_i,\ where\ i = 1,2,..., 20,\ \epsilon_i \sim N(0, {\sigma_{\epsilon}}^2)$$
+
+其中$\beta_0$為截距項，$\beta_1$為迴歸線之斜率，$\epsilon_i$為服從常態分配的殘差項。我們欲探討太陽黑子個數對於湖水水位的預測力是否顯著，也就是要檢定迴歸係數$\beta_1$是否顯著不為0，研究假說如下：
+
+$$H_0: \beta_1 = 0\ v.s.\ H_1: \beta_1 \neq 0$$
+
+## 資料分析
+
+我們進行線性迴歸的配適，並以t檢定回答研究問題。
+
+### 配適線性迴歸
+
+我們以最大概似估計法（maximum likelihood estimation）進行線性迴歸的配適，其估計式如下：
+
+\[ \hat{\beta_1} = \frac{\sum_{i=1}^n (X_i - \bar{X})(Y_i - \bar{Y})}{\sum_{i=1}^n (X_i - \bar{X})^2},\ \ \ \hat{\beta_0} = \bar{Y} - \hat{\beta_1}\bar{X},\ \ \ \hat{{\sigma_{\epsilon}}}^2 = \frac{SS_E}{n-2} = \frac{\sum_{i=1}^n(Y_i - \hat{Y_i})^2}{n-2}\]
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+model_3 <- lm(level ~ sunspots, data = lake)
+sigma_2_hat <- sum(model_3$residuals^2) / (length(model_3$residuals)-2)
+
+library(jtools)
+model_3_tb <- summ(model_3, confint = TRUE)
+df <- model_3_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+colnames(df) <- c('估計值', '95%CI下界', '95%CI上界', 't檢定統計量', 'p值')
+rownames(df) <- c('截距 (beta_0)', 'sunspots (beta_1)')
+CI <- paste0('[', df$`95%CI下界`[2], ', ', df$`95%CI上界`[2], ']')
+```
+
+以我們資料估計的結果為：\(\hat{\beta_0}=\) `r round(model_3$coefficients[1], 4)`， \(\hat{\beta_1}=\) `r round(model_3$coefficients[2], 4)`，\( \hat{{\sigma_{\epsilon}}}^2 = \) `r round(sigma_2_hat, 4)`。
+
+### 檢定統計量與結果
+
+令$n$為樣本大小，$k$為獨變項個數，檢定統計量$t_{\beta_j}$（$j = 1, ..., k$）服從自由度$n-k$的t分配，數學式如下：
+
+\[t_{\beta_j} = \frac{{}\hat{\beta_j} - 0}{Var({}\hat{\beta_j})} \sim t(n-k)\]
+
+我們令顯著水準$\alpha$為$0.05$。檢定結果如下表所示。其中，我們關心的$\beta_1$之估計值\({}\hat{\beta_1}\)為`r df$係數估計值[2]`，$1-\alpha=1-0.05=95\%$信賴區間（confident interval, CI）為`r CI`，統計檢定量$t_{TS}$為`r df$t檢定統計量[2]`，其p值為`r df$p值[2]`，小於顯著水準，因此我們拒絕$H_0$，表示我們有充分證據支持$\beta_1 = 0$這個宣稱是錯的，也就是說，太陽黑子個數對於湖水水位的預測力顯著。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+knitr::kable(df)
+```
+
+### 診斷前提假設是否滿足
+
+線性迴歸分析有以下四項基本前提假設：
+
+1. 線性關係：依變數和獨變項之間的關係必須是線性。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.width=5.5, fig.height=4.2}
+plot(lake$sunspots, lake$level, pch = 19, xlab = 'Sunspots', ylab = 'Lake level',
+     main = 'Scatter Plot of the Number of\nSunspots and Lake Level')
+```
+
+由以上散佈圖可以看出，依變數（lake level）和獨變項（sunspots）之間的關係是線性的。符合。
+
+2. 殘差（$\epsilon$）服從常態分配。
+
+3. 殘差具備獨立性。
+
+4. 殘差具備變異數同質性。
+
+2 - 4這3個假設可以下式表示：
+
+$$\epsilon \overset{iid}\sim N(0,{\sigma_{\epsilon}}^2)$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(mfcol = c(1, 2))
+plot(model_3, which = c(1, 2))
+```
+
+Normal Q-Q plot（上右圖）中殘差quantile資料點大部分落在45度線上，顯示殘差可能服從常態分布。而殘差與配適值散佈圖（上左圖）則顯示在各配適值殘差之變異數差異不大。我們以下面檢定來確認這些假設是否成立（顯著水準均設為$0.05$）。
+
+- 以Shapiro-Wilk檢定檢驗殘差常態假設：
+
+$$\begin{cases} H_0: \epsilon \sim ND \\ H_1: \epsilon\ does\ not \sim ND \end{cases}$$
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+shapiro_test_lake_ <- shapiro.test(model_3$residuals)
+```
+
+檢定結果如下：檢定統計量$W$為`r round(shapiro_test_lake_$statistic, 4)`，p值為`r shapiro_test_lake_$p.value`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差並不服從常態分配，通過常態假設。
+
+- 以Durbin-Waston檢定檢驗殘差獨立性：
+
+$$\begin{cases} H_0: Residuals\ are\ independent.\\ H_1: Residuals\ are\ not\ independent. \end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(lmtest)
+dwtest_ <- dwtest(model_3)
+```
+
+檢定結果如下：檢定統計量$DW$為`r round(dwtest_$statistic, 4)`，p值為`r round(dwtest_$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備獨立性，通過獨立假設。
+
+- 以Brown-Forsythe檢定檢驗殘差變異同質性：
+
+$$\begin{cases} H_0: {\sigma_{\epsilon_1}}^2 = {\sigma_{\epsilon_2}}^2 = ... = {\sigma_{\epsilon_i}}^2 \\ H_1: At\ least\ a\ pair\ (i, i')\ s.t. {\sigma_{\epsilon_i}}^2 \neq {\sigma_{\epsilon_{i'}}}^2 \end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(onewaytests)
+lake$group <- as.factor(lake$sunspots >= median(lake$sunspots))
+lake$residuals <- model_3$residuals
+bf <- bf.test(residuals ~ group, data = lake, verbose = FALSE)
+```
+
+檢定結果如下：檢定統計量$BF$為`r round(bf$statistic, 4)`，p值為`r round(bf$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備變異同質性，通過變異同質性假設。
+
+## 結論
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+R_2 <- (var(lake$level) - sigma_2_hat) / var(lake$level)
+```
+
+我們建立了以太陽黑子個數（$X$）來預測湖水水位（$Y$）的線性迴歸模型：
+
+\[{}\hat{Y_i} = {}\hat{\beta_0} + {}\hat{\beta_1}X_i\]
+
+其中 \(\hat{\beta_0}=\) `r round(model_3$coefficients[1], 4)`， \(\hat{\beta_1}=\) `r round(model_3$coefficients[2], 4)`，其模型解釋力可由經由自由度校正的決定係數$R^2_{adj}$描述，為`r round(R_2, 4)`，顯示我們建立的迴歸模型可以解釋依變項（i.e., 湖水水位）大部分的變異。$R^2_{adj}$公式如下：
+
+$$R^2 = 1 - \frac{SS_E / (n - K)}{SS_T / (n-1)}$$
+
+將迴歸線繪製於兩變項的散佈圖上：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=4}
+library(ggplot2)
+ggplot(aes(x = sunspots, y = level), data = lake) +
+  geom_point() +
+  geom_abline(slope = model_3$coefficients[2],
+              intercept = model_3$coefficients[1], col = 'red') +
+  #geom_smooth(method = 'lm', aes(color = 'red'), linetype = 1) +
+  labs(x = 'No. of Sunspots', y = 'Lake Level') +
+  ggtitle('Scatter Plot of No. of Sunspots and Lake Level\nwith The Linear Regression Line') +
+  theme_bw()
+```

@@ -1,0 +1,782 @@
+---
+title: "統計諮詢 - 作業3"
+subtitle: "國立成功大學統計學系暨數據科學研究所"
+author: "廖傑恩（RE6094028）"
+date: "`r Sys.Date()`"
+geometry: margin = 1in
+fontsize: 12pt
+linestretch: 1.2
+documentclass: ctexart
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: no
+    keep_tex: yes
+classoption: "hyperref, a4paper"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = FALSE, fig.align = 'center')
+```
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(HH)
+library(dplyr)
+library(jtools)
+library(ggplot2)
+```
+
+# Exercise 9.3
+
+## 問題敘述
+
+諮詢者想以賓州伊利在1970年代的房屋的特徵對其房價進行預測。
+
+## 資料介紹
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+data(hpErie)
+```
+
+資料是由Narula與Wellington（1977）提供，共有`r nrow(hpErie)`列、`r ncol(hpErie)`個變項，每一列為一棟賓州伊利在1970年代房屋售價的資料。變項包含了房價與其可能的預測因子（predictor），說明如下：
+
+1. `price`: 價格（單位：100元）
+
+2. `taxes`: 稅（單位：元）
+
+3. `bathrm`: 浴室數量
+
+4. `lotsize`: 地皮尺寸（單位：平方英呎）
+
+5. `sqfeet`: 居住空間大小（單位：平方英呎）
+
+6. `garage`: 車庫能停放的汽車數量
+
+7. `rooms`: 房間數量
+
+8. `bedrm`: 寢室數量
+
+9. `age`: 屋齡（單位：年）
+
+10. `type`: 房屋建材型態，有：磚（brick）、磚和木框（brick and frame）、鋁和木框（aluminum and frame）、木框（frame）4種
+
+11. `style`: 類型，有2層、1.5層和牧場住宅（ranch）3種
+
+12. `fireplac`: 壁爐數量
+
+### 資料探索
+
+- 針對數值型變項繪製兩兩散佈圖矩陣以快速觀察這些變項間的關聯
+
+非數值型變項而沒有納入繪製的變項：`type`與`style`
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(GGally)
+hpErie %>% dplyr::select(-type, -style) %>% ggpairs(., upper = list(na = 'na'))
+```
+
+由此矩陣可以發現，大部分數值型變項兩兩之間似乎有所關聯，若直接進行線性迴歸的配適，可能會產生共線性的問題因此必須要先檢查共線性。此外，在房價這個變項上好像有若干特別的值，我們再針對房價繪圖以了解其分布狀態。
+
+- 針對目標變項「房價」繪圖以了解其分布狀態
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(mfcol = c(1, 2))
+hist(hpErie$price, freq = FALSE, xlab = 'House Price', main = 'Histogram of House Price')
+boxplot(hpErie$price, main = 'Box Plot of House Price')
+```
+
+由直方圖（histogram）可以發現，有少部分房屋的房價特別高。盒鬚圖（box plot）則顯示兩有2間房屋價格的值特別大。由於樣本數不多，這樣極端的值可能就會對之後的分析造成影響，顯示我們有可能需要將資料進行轉換，或是其他處理。我們先嘗試看看直接將其移除，以剩下的資料點來繪製散步圖矩陣。
+
+- 移除極端值，針對數值型變項繪製兩兩散佈圖矩陣以快速觀察這些變項間的關聯
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+hpErie %>% dplyr::filter(hpErie$price < 500) %>% 
+  dplyr::select(-type, -style) %>% ggpairs(., upper = list(na = 'na'))
+```
+
+由此矩陣可以發現，即使移除2筆房價特別大的資料，大部分數值型變項兩兩之間似乎仍有所關聯，若直接進行線性迴歸的配適，可能會產生共線性的問題因此必須要先檢查共線性。
+
+### 建立迴歸模型
+
+#### 變數與模型定義
+
+- 定義變數
+
+    1. 令$Y$為`price`（房價）
+    2. 令$X_{taxes}$為`taxes`（稅金）
+    3. 令$X_{bathrm}$為`bathrm`（浴室數量）
+    4. 令$X_{lotsize}$為`lotsize`（地皮尺寸）
+    5. 令$X_{sqfeet}$為`sqfeet`（居住空間大小）
+    6. 令$X_{garage}$為`garage`（車庫能停放的汽車數量）
+    7. 令$X_{room}$為`rooms`（房間數量）
+    8. 令$X_{bedrm}$為`bedrm`（寢室數量）
+    9. 令$X_{age}$為`age`（屋齡）
+    10. 令$X_{type.bf}$為`type`（房屋建材型態）是否為「磚和木框（brick and frame）」，是=1，否=0
+    11. 令$X_{type.af}$為`type`（房屋建材型態）是否為「鋁和木框（aluminum and frame）」，是=1，否=0
+    12. 令$X_{type.f}$為`type`（房屋建材型態）是否為「木框（frame）」，是=1，否=0
+    13. 令$X_{style.1.5}$為`style`（房屋類型）是否為「1.5層」，是=1，否=0
+    14. 令$X_{style.r}$為`style`（房屋類型）是否為「牧場住宅（ranch）」，是=1，否=0
+    15. 令$X_{fireplac}$為`fireplac`（壁爐數量）
+    
+- 模型假設
+
+\[ y_i = \beta_0 + \beta_1x_{i,taxes} + \beta_2x_{i,bathrm} + \beta_3x_{i,lotsize} + \beta_4x_{i,sqfeet} + \beta_5x_{i,garage}\] \[+ \beta_6x_{i,room} + \beta_7x_{i,bedrm} + \beta_8x_{i,age} + \beta_9x_{i,type.bf} + \beta_{10}x_{i,type.af}\] \[+ \beta_{11}x_{i,type.f} + \beta_{12}x_{i,style.1.5} + \beta_{13}x_{i,style.r} + \beta_{14}x_{i,fireplac} + \epsilon\]
+
+其中$\epsilon \overset{iid} \sim N(0,{\sigma}^2)$
+
+亦可以向量與矩陣的方式表達以求簡潔：
+
+\[\tilde{Y} = \tilde{\beta}_0 + \tilde{\beta}\mathbf{X}^T + \tilde{\epsilon},\ \tilde{\epsilon} \overset{iid} \sim N(\tilde{0}, \tilde{{\sigma}^2})\]
+
+其中，$\tilde{Y}$為所有觀測值之房價形成的`r nrow(hpErie)` $\times 1$的向量；$\tilde{\beta}_0$為`r nrow(hpErie)`;相同的截距$\beta_0$形成的`r nrow(hpErie)` $\times 1$的向量；$\tilde{\beta}$為除了截距之外的其他迴歸係數$\beta_1,...,\beta_{14}$形成的$1 \times 13$的向量；$\mathbf{X}$則為`r nrow(hpErie)`$\times 14$的矩陣，其列為所有觀測值、行為所有變項；$\tilde{\epsilon}$、$\tilde{0}$與$\tilde{{\sigma}^2}$皆為`r nrow(hpErie)`$\times 1$的向量，分別為殘差向量、零向量與變異數向量。
+
+#### 檢查共線性
+
+由散佈圖可知獨變項間彼此之間有相關性，故必須先檢查獨變項間是否有共線性，以免共線性影響配適結果，檢查方式為先計算全部獨變項間的膨脹係數（VIF）值：
+
+$$VIF_{p} = \frac{1}{1 - R_p^2}$$
+其中$R_p^2$為以獨變項$p$建立的迴歸模型的決定係數。
+
+獨變項之VIF值大於$5$表示其可由其他獨變項線性組合而成，表示與其他獨變項具有明顯的共線性。我們先剔除VIF值最大之獨變項，再進行一次VIF的計算，並重複以上過程直至所有獨變項之VIF值皆小於5為止。最後選出之不具共線性之獨變項有：$X_{lotsize}$、$X_{garage}$、$X_{rooms}$、$X_{age}$、$X_{type.bf}$、$X_{type.af}$、$X_{type.f}$、$X_{style.1.5}$、$X_{style.ranch}$與$X_{fireplac}$等10個
+
+#### 逐步迴歸分析（stepwise selection）
+
+我們使用逐步選擇法中的向後選擇法（back selection），先將所有數值型變項都納入模型，再逐步移除對模型貢獻程度最低的變項，直到模型配適度（goodness of fit）不再改善。在這裡，我們以赤池訊息量準則（Akaike information criterion, AIC）作為模型配適度指標，其公式如下：
+
+\[ AIC =-2\ln(L) + 2k = n\ln(\frac{SS_R}{n}) + 2k\]
+其中$L$為概似函數（likelihood function），$k$為參數數量，$n$為觀察值個數，$SS_R$是模型殘差平方和。
+
+由於$SS_R$越高，表示模型不能夠解釋的變異性越大，因此$AIC$越大表示模型配適越差。
+
+下表列出了我們進行逐步選擇的過程：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+X <- hpErie %>%
+  mutate(type.bf = as.numeric(type == 'brick&frame'),
+         type.af = as.numeric(type == 'alum&frame'),
+         type.f = as.numeric(type == 'frame'),
+         style.1.5 = as.numeric(style == '1.5.story'),
+         style.ranch = as.numeric(style == 'ranch'))
+
+model_null <- lm(price ~ 1, data = X)
+model_full <- lm(price ~ lotsize + garage + rooms + age + type.bf + type.af +
+                   type.f + style.1.5 + style.ranch + fireplac, data = X)
+step_back <- step(model_full, scope = list(upper = model_full),
+                  direction = 'back', trace = 0)
+
+df <- step_back$anova[,c(1,6)]
+df$Step[2:nrow(df)] <- gsub('- ', '移除', df$Step[2:nrow(df)])
+df$Step[1] <- '納入所有變項的原始模型'
+colnames(df) <- c('步驟', '步驟完成後的模型AIC')
+knitr::kable(df)
+```
+
+經過變數挑選後的模型為：
+
+\[ \hat{y}_i = \hat{\beta_0} + \hat{\beta}_6x_{i, rooms} + \hat{\beta}_8x_{i, age} + \hat{\beta}_9x_{i,type.bf} + \hat{\beta}_{11}x_{i,type.f} + \hat{\beta}_{14}x_{fireplac} \]
+
+其中\(\hat{\beta_0}=\) `r round(step_back$coefficients[1], 4)`，\(\hat{\beta}_6=\) `r round(step_back$coefficients[2], 4)`，\(\hat{\beta}_8=\) `r round(step_back$coefficients[3], 4)`，\(\hat{\beta}_9=\) `r round(step_back$coefficients[4], 4)`，\(\hat{\beta}_{11}=\) `r round(step_back$coefficients[5], 4)`，\(\hat{\beta}_{14}=\) `r round(step_back$coefficients[6], 4)`。
+
+各個獨變項的係數估計值中，只有屋齡`age`（\(\hat{\beta}_8=\)）為負，表示隨著屋齡上升，房價會較低，而其他變項都與房價呈現正相關，房間數量（`rooms`）、房屋建材型態是否為「磚和木框」（`type.bf`）、房屋建材型態是否為「木框」（`type.f`）與壁爐數量（`fireplac`）。
+
+##### 整體模型之F檢定
+
+我們對以上的迴歸估計式進行顯著性為$0.05$之整體F檢定（Overall F test），檢定 該迴歸模型是否對於房價具有解釋效力。
+
+- 研究假設為：$H_0: \beta_6 = \beta_8 = \beta_9 = \beta_{11} = \beta_{14} = 0\ v.s.\ H_1: Not\ H_0$
+
+- 檢定統計量：
+
+\[F=\frac{MS_R}{MS_E} \sim F(k,\ n-k-1);\ \begin{cases} MS_R = \frac{1}{k}\sum_{i=1}^n (\hat{y_i} - \bar{y})^2 \\ MS_E = \frac{1}{n-k-1} \sum_{i=1}^n (y_i - \hat{y_i})^2\end{cases}\]
+其中$n$為樣本大小（i.e., `r nrow(X)`），$k$為最後納入模型的獨變項個數（i.e., `r length(step_back$coefficients) - 1`）。此檢定統計量服從自由度為$k$與$n-k-1$的F分配。
+
+- 檢定結果：檢定統計量$F$為$16.55$，其p值為`r round(1 - pf(16.55, 5, 22), 4)`，小於顯著水準，因此我們拒絕$H_0$，表示此迴歸模型對於依變項房價具有解釋力。
+
+##### 迴歸係數之t檢定
+
+在假設\(\epsilon \overset{iid} \sim N(0, {\sigma}^2)\)成立的情況下，我們可以單樣本t檢定對每個迴歸係數$\beta$檢定其是否顯著不為零。
+
+- 研究假設：$H_0: \beta_j = 0,\ v.s. \beta_j \neq 0,\ \forall j = 6,8,9,11,14$
+
+- 檢定統計量：
+
+\[T_j = \frac{\hat{\beta}_j}{\sqrt{\hat{Var}(\beta_j)}} \sim t(n-k-1)\]
+
+- 檢定結果：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sum_tb <- summ(step_back, confint = TRUE)
+df_ <- sum_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+colnames(df_) <- c('估計值', '95%CI下界', '95%CI上界', 't檢定統計量', 'p值')
+S <- rownames(df_)
+rownames(df_) <- paste0(c('截距', S[-1]), ' (beta_', c(0,6,8,9,11,14), ')')
+knitr::kable(df_)
+```
+
+針對各係數的t檢定結果如上表。其中檢定$\beta_6$、$\beta_8$與$\beta_{14}$得到的t統計量之p值小於顯著水準，因此我們在這三個檢定中可以拒絕$H_0$，顯示我們有充分證據可以宣稱$\beta_6=0$、$\beta_8=0$與$\beta_{14}=0$都是錯的，也就是說，房間數量、屋齡與壁爐數量對於房價都有顯著的預測力。
+
+##### 殘差模型診斷
+
+我們以Shapiro-Wilk檢定檢驗模型殘差$\epsilon_i$是否為常態分配，令顯著水準為$0.05$，其假設如下:
+
+$$H_0: \epsilon_i \sim ND\ v.s.\ H_1: \epsilon_i\ does\ not \sim ND$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sw_test <- shapiro.test(step_back$residuals) 
+```
+
+檢定結果：檢定統計量$W$為`r round(sw_test$statistic, 4)`，p值為`r round(sw_test$p.value,4)`，不小於顯著水準，因此我們不拒絕$H_0$，表示我們沒有足夠的證據顯示殘差不服從常態分配，通過診斷。
+
+##### 配適結果
+
+我們建立一個預測房價的複迴歸模型：
+
+\[ \hat{y}_i = \hat{\beta_0} + \hat{\beta}_6x_{i, rooms} + \hat{\beta}_8x_{i, age} + \hat{\beta}_9x_{i,type.bf} + \hat{\beta}_{11}x_{i,type.f} + \hat{\beta}_{14}x_{fireplac}\]
+
+其中\(\hat{\beta_0}=\) `r round(step_back$coefficients[1], 4)`，\(\hat{\beta}_6=\) `r round(step_back$coefficients[2], 4)`，\(\hat{\beta}_8=\) `r round(step_back$coefficients[3], 4)`，\(\hat{\beta}_9=\) `r round(step_back$coefficients[4], 4)`，\(\hat{\beta}_{11}=\) `r round(step_back$coefficients[5], 4)`，\(\hat{\beta}_{14}=\) `r round(step_back$coefficients[6], 4)`。
+
+此迴歸模型經由自由度調整後的決定係數$R_{adj}^2$為$0.7422$，顯示大部分的變異可以被此模型解釋。由係數可知，在固定其餘獨變項下，房屋每多一間房間，房價便提升`r round(step_back$coefficients[2], 4)*100`美元；屋齡每多一年，房價便下跌`r -round(step_back$coefficients[3], 4)*100`美元；房屋每多一個壁爐，房價便提升`r round(step_back$coefficients[6], 4)*100`。
+
+#### 剔除極端值後檢驗模型解釋力
+
+在先前資料探索的部分我們以發現原始資料中有2筆資料房價明顯高於其他房屋，因此嘗試將這2筆 資料剔除，對剩餘資料進行整體F檢定，檢查該迴歸模型是否依舊適配。
+
+- 研究假設為：$H_0: \beta_6 = \beta_8 = \beta_9 = \beta_{11} = \beta_{14} = 0\ v.s.\ H_1: Not\ H_0$
+
+- 檢定統計量：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+X_ <- X %>% filter(price < 500)
+model_remove <- lm(price ~ rooms + age + type.bf + type.f + fireplac, data = X_)
+sum_tb <- summ(model_remove, confint = TRUE)
+```
+
+\[F=\frac{MS_R}{MS_E} \sim F(k,\ n-k-1);\ \begin{cases} MS_R = \frac{1}{k}\sum_{i=1}^n (\hat{y_i} - \bar{y})^2 \\ MS_E = \frac{1}{n-k-1} \sum_{i=1}^n (y_i - \hat{y_i})^2\end{cases}\]
+其中$n$為樣本大小（i.e., `r nrow(X_)`），$k$為最後納入模型的獨變項個數（i.e., `r length(model_remove$coefficients) - 1`）。此檢定統計量服從自由度為$k$與$n-k-1$的F分配。
+
+- 檢定結果：
+
+檢定統計量$F$為$6.38$，其p值為`r round(1 - pf(6.38, 5, 20), 4)`，小於顯著水準，因此我們拒絕$H_0$，表示此迴歸模型對於依變項房價仍具有解釋力。然而，$R_{adj}^2$由$0.7422$大幅下滑至$0.5183$，表示模型解釋力大幅下降。
+
+#### 創建新變項再次進行逐次選擇法
+
+由以上分析可知，由原始資料所配適的迴歸模型可能是在有極端值的存在下才具備如此高的解釋力，一旦極端值被剔除，模型解釋力便大幅下降，因此嘗試加入改變型態的獨變項。我們以居住空間大小`sqfeet`這個獨變項的平方作為新變項`sqfeetsq`，令其為$X_{sqfeetsq}$，並再次進行共線性檢查與逐次選擇法。
+
+##### 檢查共線性
+
+依照前方之標準與步驟檢查獨立變量中的共線性，彼此不具共線性之獨變項有：$X_{lotsize}$、$X_{garage}$、$X_{age}$、$X_{type.bf}$、$X_{type.af}$、$X_{type.f}$、$X_{style.1.5}$、$X_{style.ranch}$、$X_{fireplac}$與$X_{sqfeetsq}$等10個。
+
+##### 逐次迴歸分析
+
+我們同樣使用逐步選擇法中的向後選擇法，並以AIC作為模型配適度指標。下表列出了我們進行逐步選擇的過程：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+X <- hpErie %>%
+  mutate(type.bf = as.numeric(type == 'brick&frame'),
+         type.af = as.numeric(type == 'alum&frame'),
+         type.f = as.numeric(type == 'frame'),
+         style.1.5 = as.numeric(style == '1.5.story'),
+         style.ranch = as.numeric(style == 'ranch'),
+         sqfeetsq = sqfeet^2)
+
+model_null <- lm(price ~ 1, data = X)
+model_full <- lm(price ~ lotsize + garage + age + type.bf + type.af + type.f +
+                   style.1.5 + style.ranch + fireplac + sqfeetsq, data = X)
+step_back <- step(model_full, scope = list(upper = model_full),
+                  direction = 'back', trace = 0)
+```
+
+最後的模型為：
+
+經過變數挑選後的模型為：
+
+\[ \hat{y}_i = \hat{\beta_0} + \hat{\beta}_5x_{i, garage} + \hat{\beta}_8x_{i, age} + \hat{\beta}_9x_{i,type.bf} + \hat{\beta}_{10}x_{i,type.af} + \hat{\beta}_{11}x_{i,type.f} + \hat{\beta}_{14}x_{fireplac} + \hat{\beta}_{15}x_{sqfeetsq}\]
+
+其中\(\hat{\beta_0}=\) `r round(step_back$coefficients[1], 4)`，
+\(\hat{\beta}_5=\) `r round(step_back$coefficients[2], 4)`，
+\(\hat{\beta}_8=\) `r round(step_back$coefficients[3], 4)`，
+\(\hat{\beta}_9=\) `r round(step_back$coefficients[4], 4)`，
+\(\hat{\beta}_{10}=\) `r round(step_back$coefficients[5], 4)`，
+\(\hat{\beta}_{11}=\) `r round(step_back$coefficients[6], 4)`，
+\(\hat{\beta}_{14}=\) `r round(step_back$coefficients[7], 4)`，
+\(\hat{\beta}_{15}=\) `r round(step_back$coefficients[8], 4)`。
+
+各個獨變項的係數估計值中，只有屋齡`age`（\(\hat{\beta}_8\)）為負，表示隨著屋齡上升，房價會較低，而其他變項都與房價呈現正相關。
+
+##### 整體模型之F檢定
+
+我們對以上的迴歸估計式進行顯著性為$0.05$之整體F檢定，檢定該迴歸模型是否對於房價具有解釋效力。
+
+- 研究假設為：
+
+$$H_0: \beta_5 = \beta_8 = \beta_9 = \beta_{10} = \beta_{11} = \beta_{14} =  beta_{15} = 0\ v.s.\ H_1: Not\ H_0$$
+
+- 檢定統計量：
+
+\[F=\frac{MS_R}{MS_E} \sim F(k,\ n-k-1);\ \begin{cases} MS_R = \frac{1}{k}\sum_{i=1}^n (\hat{y_i} - \bar{y})^2 \\ MS_E = \frac{1}{n-k-1} \sum_{i=1}^n (y_i - \hat{y_i})^2\end{cases}\]
+其中$n$為樣本大小（i.e., `r nrow(X)`），$k$為最後納入模型的獨變項個數（i.e., `r length(step_back$coefficients) - 1`）。此檢定統計量服從自由度為$k$與$n-k-1$的F分配。
+
+- 檢定結果：檢定統計量$F$為$81.42$，其p值為`r round(1 - pf(81.42, 7, 20), 4)`，小於顯著水準，因此我們拒絕$H_0$，表示此迴歸模型對於依變項房價具有解釋力。
+
+##### 迴歸係數之t檢定
+
+在假設\(\epsilon \overset{iid} \sim N(0, {\sigma}^2)\)成立的情況下，我們可以單樣本t檢定對每個迴歸係數$\beta$檢定其是否顯著不為零。
+
+- 研究假設：$H_0: \beta_j = 0,\ v.s. \beta_j \neq 0,\ \forall j = 5,8,9,10,11,14,15$
+
+- 檢定統計量：
+
+\[T_j = \frac{\hat{\beta}_j}{\sqrt{\hat{Var}(\beta_j)}} \sim t(n-k-1)\]
+
+- 檢定結果：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sum_tb <- summ(step_back, confint = TRUE)
+df_ <- sum_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+colnames(df_) <- c('估計值', '95%CI下界', '95%CI上界', 't檢定統計量', 'p值')
+S <- rownames(df_)
+rownames(df_) <- paste0(c('截距', S[-1]), ' (beta_', c(0,5,8,9,10,11,14,15), ')')
+knitr::kable(df_)
+```
+
+針對各係數的t檢定結果如上表。其中檢定$\beta_5$、$\beta_8$、$\beta_{10}$、$\beta_{11}$、$\beta_{14}$與$\beta_{15}$得到的t統計量之p值小於顯著水準，因此我們在這6個檢定中可以拒絕$H_0$，顯示我們有充分證據可以宣稱$\beta_5=0$、$\beta_8=0$、$\beta_{10}=0$、$\beta_{11}=0$、$\beta_{14}=0$與$\beta_{15}=0$都是錯的，也就是說，車庫能容納的汽車數量、屋齡、房屋建材型態、壁爐數量與居住空間大小（經過平方轉換）對於房價都有顯著的預測力。
+
+##### 殘差模型診斷
+
+我們以Shapiro-Wilk檢定檢驗模型殘差$\epsilon_i$是否為常態分配，令顯著水準為$0.05$，其假設如下:
+
+$$H_0: \epsilon_i \sim ND\ v.s.\ H_1: \epsilon_i\ does\ not \sim ND$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+sw_test <- shapiro.test(step_back$residuals) 
+```
+
+檢定結果：檢定統計量$W$為`r round(sw_test$statistic, 4)`，p值為`r round(sw_test$p.value,4)`，不小於顯著水準，因此我們不拒絕$H_0$，表示我們沒有足夠的證據顯示殘差不服從常態分配，通過診斷。
+
+##### 配適結果
+
+我們建立一個預測房價的複迴歸模型：
+
+\[ \hat{y}_i = \hat{\beta_0} + \hat{\beta}_5x_{i, garage} + \hat{\beta}_8x_{i, age} + \hat{\beta}_9x_{i,type.bf} + \hat{\beta}_{10}x_{i,type.af} + \hat{\beta}_{11}x_{i,type.f} + \hat{\beta}_{14}x_{fireplac} + \hat{\beta}_{15}x_{sqfeetsq}\]
+
+其中\(\hat{\beta_0}=\) `r round(step_back$coefficients[1], 4)`，\(\hat{\beta}_5=\) `r round(step_back$coefficients[2], 4)`，\(\hat{\beta}_8=\) `r round(step_back$coefficients[3], 4)`，\(\hat{\beta}_9=\) `r round(step_back$coefficients[4], 4)`，\(\hat{\beta}_{10}=\) `r round(step_back$coefficients[5], 4)`，\(\hat{\beta}_{11}=\) `r round(step_back$coefficients[6], 4)`，\(\hat{\beta}_{14}=\) `r round(step_back$coefficients[7], 4)`，\(\hat{\beta}_{15}=\) `r round(step_back$coefficients[8], 4)`。
+
+此迴歸模型經由自由度調整後的決定係數$R_{adj}^2$為$0.9542$，顯示極大部分的變異可以被此模型解釋。由係數可知，在固定其餘獨變項下，房屋車庫容納量每多一台汽車，房價便提升`r round(step_back$coefficients[2], 4)*100`美元；屋齡每多一年，房價便下跌`r -round(step_back$coefficients[3], 4)*100`美元；房屋每多一個壁爐，房價便提升`r round(step_back$coefficients[7], 4)*100`。
+
+##### 再次剔除極端值後檢驗模型解釋力
+
+在先前資料探索的部分我們以發現原始資料中有2筆資料房價明顯高於其他房屋，因此嘗試將這2筆 資料剔除，對剩餘資料進行整體F檢定，檢查該迴歸模型是否依舊適配。
+
+- 研究假設：
+
+$$H_0: \beta_5 = \beta_8 = \beta_9 = \beta_{10} = \beta_{11} = \beta_{14} = \beta_{15} = 0\ v.s.\ H_1: Not\ H_0$$
+
+- 檢定統計量：
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+X_ <- X %>% filter(price < 500)
+model_remove <- lm(price ~ garage + age + type.bf + type.af + type.f + fireplac + sqfeetsq, data = X_)
+sum_tb <- summ(model_remove, confint = TRUE)
+```
+
+\[F=\frac{MS_R}{MS_E} \sim F(k,\ n-k-1);\ \begin{cases} MS_R = \frac{1}{k}\sum_{i=1}^n (\hat{y_i} - \bar{y})^2 \\ MS_E = \frac{1}{n-k-1} \sum_{i=1}^n (y_i - \hat{y_i})^2\end{cases}\]
+其中$n$為樣本大小（i.e., `r nrow(X_)`），$k$為最後納入模型的獨變項個數（i.e., `r length(model_remove$coefficients) - 1`）。此檢定統計量服從自由度為$k$與$n-k-1$的F分配。
+
+- 檢定結果：
+
+檢定統計量$F$為$10.87$，其p值為`r round(1 - pf(10.87, 7, 18), 4)`，小於顯著水準，因此我們拒絕$H_0$，表示此迴歸模型對於依變項房價仍具有解釋力。$R_{adj}^2$也仍保有$0.7342$。
+
+#### 模型比較
+
+新增變數之線性迴歸模型$R_{adj}^2$明顯大於原始資料的做逐步分析所配適之模型的$R_{adj}^2$，表示前者可相較後者解釋較多變異。且新增變數之線性迴歸模型$R_{adj}^2$在剔除極端值後依舊具有解釋能力，亦即該迴歸模型受極端值的影響較小，說明前者擁有更高的預測能力。
+
+# Exercise 10.4
+
+## 研究問題
+
+Hand等人（1994）蒐集了英格蘭和威爾斯大型市鎮中於1958至1964年的男性平均死亡率、公共飲水中的鈣濃等資料，同時也紀錄了這些市鎮是否位於Derby鎮的北方。研究問題是藉由資料分析解釋死亡率與鈣含量、地理位置的關係，並提出對於公衛政策的建議。
+
+## 資料介紹
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=4}
+data(water)
+```
+
+資料集由Hand等人（1994）提供，有`r nrow(water)`列、`r ncol(water)`個變項，一列為一個位於英格蘭與威爾斯的大型市鎮的資料，變項說明如下：
+
+- `mortality`: 每十萬名男性的平均死亡率，取1958-1964年間的數值平均。
+
+- `calcium`: 公共飲水的鈣濃度（單位：ppm），反應了水質硬的程度
+
+- `derbynor`: 該市鎮是否比Derby鎮還北邊，二分變項
+
+## 資料分析
+
+### 資料探索
+
+我們先以散佈圖看`mortality`與`calcium`這兩個變項的關聯，並以`derbynor`分層來看。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+
+water %>%
+  mutate(Location = c('South of Derby', 'North of Derby')[derbynor + 1]) %>%
+  qplot(y = mortality, x = calcium, col = Location, data = .) +
+  facet_wrap(. ~ Location) +
+  theme_bw() + theme(legend.position = 'none') +
+  ggtitle('Scatter Plots of Calcium in Public Water and Avg. Male Mortality')
+```
+
+由上圖可發現：`mortality`與`calcium`間似乎呈現負相關。而是否位於Derby北邊（`derbynor`）似乎對`mortality`變異的解釋也有貢獻：整體而言，位於Derby北邊的市鎮（i.e., `derbynor`=1）`mortality`比位於Derby南邊的市鎮（i.e., `derbynor`=0）還高。
+
+### 建立迴歸模型
+
+#### 分別針對位於Derby北邊與南邊的市鎮建立以鈣濃度預測死亡率的迴歸模型
+
+- 定義變數：
+
+    - $Y_{i,N}$為位於Derby北方之市鎮$i$的男性平均死亡率
+    - $Y_{j,S}$為位於Derby南方之市鎮$j$的男性平均死亡率
+    - $X_{i,ca,N}$為位於Derby北方之市鎮$i$公共飲水的鈣濃度
+    - $X_{i,ca,S}$為位於Derby南方之市鎮$j$公共飲水的鈣濃度
+    - 其中$i=1,2,...,35$，$j=1,2,...,26$
+
+- 模型：
+
+$$\begin{cases} Y_{i,N} = \beta_{0,N} + \beta_{1,N}X_{i,ca,N} + \epsilon_{i,N} \\ Y_{j,S} = \beta_{0,S} + \beta_{1,S}X_{j,ca,S} + \epsilon_{j,S} \end{cases}$$
+其中，$\beta_{0,N}$與$\beta_{0,S}$分別為兩地區市鎮迴歸模型之截距，$\beta_{1,N}$與$\beta_{1,S}$分別為兩地區市鎮迴歸模型之斜率，$\epsilon_{i,N}$與$\epsilon_{i,S}$則為各自的殘差項，且$\epsilon_{i,N} \overset{iid}\sim  N(0, \sigma^2_i);\ \epsilon_{j,S} \overset{iid}\sim  N(0, \sigma^2_j)$
+
+- 研究假設：
+
+我們欲探討公共飲水鈣濃度對於男性平均死亡率的預測力各自在兩個區域是否顯著，也就是要分別檢定迴歸係數$\beta_{1,N}$與$\beta_{1,S}$是否顯著不為0，研究假說為$H_0: \beta_{1,N} = 0\ v.s.\ H_1: \beta_{1,N} \neq 0$與$H_0: \beta_{1,S} = 0\ v.s.\ H_1: \beta_{1,S} \neq 0$。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+model_N <- lm(mortality ~ calcium, data = water[water$derbynor==1,])
+model_S <- lm(mortality ~ calcium, data = water[water$derbynor==0,])
+sigma_2_hat_N <- sum(model_N$residuals^2) / (length(model_N$residuals)-2)
+sigma_2_hat_S <- sum(model_S$residuals^2) / (length(model_S$residuals)-2)
+
+library(jtools)
+model_N_tb <- summ(model_N, confint = TRUE)
+df_N <- model_N_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+colnames(df_N) <- c('估計值', '95%CI下界', '95%CI上界', 't檢定統計量', 'p值')
+rownames(df_N) <- c('截距 (beta_0)', '鈣濃度 (beta_1)')
+CI_N <- paste0('[', df_N$`95%CI下界`[2], ', ', df_N$`95%CI上界`[2], ']')
+
+model_S_tb <- summ(model_S, confint = TRUE)
+df_S <- model_S_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+colnames(df_S) <- c('估計值', '95%CI下界', '95%CI上界', 't檢定統計量', 'p值')
+rownames(df_S) <- c('截距 (beta_0)', '鈣濃度 (beta_1)')
+CI_S <- paste0('[', df_S$`95%CI下界`[2], ', ', df_S$`95%CI上界`[2], ']')
+```
+
+- 檢定統計量與結果
+
+依據資料的估計的結果為：
+
+\[ \begin{cases} \hat{Y}_{i,N} = \hat{\beta}_{0,N} + \hat{\beta}_{1,N}X_{i,ca,N} \\ \hat{Y}_{j,S} = \hat{\beta}_{0,S} + \hat{\beta}_{1,S}X_{j,ca,S} \end{cases} \]
+
+其中
+\(\hat{\beta}_{0,N}=\) `r round(model_N$coefficients[1], 4)`， \(\hat{\beta}_{1,N}=\) `r round(model_N$coefficients[2], 4)`，
+\( \hat{{\sigma_{i}}}^2 = \) `r round(sigma_2_hat_N, 4)`
+
+\(\hat{\beta}_{0,S}=\) `r round(model_S$coefficients[1], 4)`， \(\hat{\beta}_{1,S}=\) `r round(model_S$coefficients[2], 4)`，
+\( \hat{{\sigma_{j}}}^2 = \) `r round(sigma_2_hat_S, 4)`。
+
+令$n$為樣本大小，$k$為獨變項個數，檢定統計量$t_{\beta_j}$（$j = 1, ..., k$）服從自由度$n-k$的t分配，數學式如下：
+
+\[t_{\beta_j} = \frac{{}\hat{\beta_j} - 0}{Var({}\hat{\beta_j})} \sim t(n-k)\]
+
+我們令顯著水準$\alpha$為$0.05$。針對Derby北方市鎮的檢定結果如下表所示。其中，我們關心的$\beta_{1,N}$之估計值\(\hat{\beta}_{1,N}\)為`r df_N$係數估計值[2]`，$1-\alpha=1-0.05=95\%$信賴區間（confident interval, CI）為`r CI_N`，統計檢定量$t_{TS}$為`r df_N$t檢定統計量[2]`，其p值為`r df_N$p值[2]`，小於顯著水準，因此我們拒絕$H_0$，表示我們有充分證據支持$\beta_{1,N} = 0$這個宣稱是錯的，也就是說，在位於Derby北方市鎮中，公共飲水鈣濃度對於男性平均死亡率的預測力顯著。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+knitr::kable(df_N)
+```
+
+針對Derby南方市鎮的檢定結果如下表所示。其中，我們關心的$\beta_{1,S}$之估計值\(\hat{\beta}_{1,S}\)為`r df_S$係數估計值[2]`，$95\%$信賴區間為`r CI_S`，統計檢定量$t_{TS}$為`r df_S$t檢定統計量[2]`，其p值為`r df_S$p值[2]`，小於顯著水準，因此我們拒絕$H_0$，表示我們有充分證據支持$\beta_{1,S} = 0$這個宣稱是錯的，也就是說，在位於Derby南方市鎮中，公共飲水鈣濃度對於男性平均死亡率的預測力顯著。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+knitr::kable(df_S)
+```
+
+- 診斷前提假設是否滿足
+
+線性迴歸分析有4項基本前提假設，我們分別針對兩個模型進行這些前題假設的診斷：
+
+1. 線性關係：依變數和獨變項之間的關係必須是線性。
+
+根據先前以是否位於Derby北方分層繪製的鈣濃度與死亡率的散佈圖，可知在兩個模型中，依變數（死亡率）和獨變項（鈣濃度）之間都呈現的線性負相關。符合。
+
+2. 殘差（$\epsilon$）服從常態分配。
+
+3. 殘差具備獨立性。
+
+4. 殘差具備變異數同質性。
+
+2 - 4這3個假設可表示成：$\epsilon_{i,N} \overset{iid}\sim  N(0, \sigma^2_i);\ \epsilon_{j,S} \overset{iid}\sim  N(0, \sigma^2_j)$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(mfcol = c(1, 2))
+plot(model_N, which = c(1, 2))
+```
+
+針對位於Derby北方市鎮的模型，Normal Q-Q plot（上右圖）中殘差quantile資料點大部分落在45度線上，顯示殘差可能服從常態分布。而殘差與配適值散佈圖（上左圖）則顯示在各配適值殘差之變異數差異不大。我們接著會進行檢定來確認這些假設是否成立（顯著水準均設為$0.05$）。
+
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(mfcol = c(1, 2))
+plot(model_S, which = c(1, 2))
+```
+
+針對位於Derby南方市鎮的模型，Normal Q-Q plot（上右圖）中殘差quantile資料點大部分落在45度線上，顯示殘差可能服從常態分布。而殘差與配適值散佈圖（上左圖）則顯示在各配適值殘差之變異數差異不大。我們以下面檢定來確認這些假設是否成立（顯著水準均設為$0.05$）
+
+- 以Shapiro-Wilk檢定檢驗殘差常態假設：
+
+$$\begin{cases} H_0: \epsilon_{i,N} \sim ND\ v.s.\ H_1: \epsilon_{i,N}\ does\ not \sim ND \\ H_0: \epsilon_{j,S} \sim ND\ v.s.\ H_1: \epsilon_{j,S}\ does\ not \sim ND\end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+shapiro_test_N <- shapiro.test(model_N$residuals)
+shapiro_test_S <- shapiro.test(model_S$residuals)
+```
+
+針對位於Derby北方市鎮的模型的檢定結果如下：檢定統計量$W$為`r round(shapiro_test_N$statistic, 4)`，p值為`r shapiro_test_N$p.value`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差並不服從常態分配，通過常態假設。
+
+針對位於Derby南方市鎮的模型的檢定結果如下：檢定統計量$W$為`r round(shapiro_test_S$statistic, 4)`，p值為`r shapiro_test_S$p.value`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差並不服從常態分配，通過常態假設。
+
+- 以Durbin-Waston檢定檢驗殘差獨立性：
+
+$$\begin{cases} H_0: \epsilon_{i,N}\ are\ independent.\ v.s.\ H_1: \epsilon_{i,N}\ are\ not\ independent. \\ H_0: \epsilon_{j,S}\ are\ independent.\ v.s.\ H_1: \epsilon_{j,S}\ are\ not\ independent. \end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(lmtest)
+dwtest_N <- dwtest(model_N)
+dwtest_S <- dwtest(model_S)
+```
+
+針對位於Derby北方市鎮的模型的檢定結果如下：檢定統計量$DW$為`r round(dwtest_N$statistic, 4)`，p值為`r round(dwtest_N$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備獨立性，通過獨立假設。
+
+針對位於Derby南方市鎮的模型的檢定結果如下：檢定統計量$DW$為`r round(dwtest_S$statistic, 4)`，p值為`r round(dwtest_S$p.value, 4)`，小於顯著水準，因此我們拒絕$H_0$，也就是說我們有充分證據支持殘差不具備獨立性，j未通過獨立假設。
+
+- 以Brown-Forsythe檢定檢驗殘差變異同質性：
+
+$$\begin{cases} H_0: {\sigma_1}^2 = {\sigma_2}^2 = ... = {\sigma_{i}}^2\ v.s.\ H_1: Not\ H_0 \\ H_0: {\sigma_1}^2 = {\sigma_2}^2 = ... = {\sigma_{j}}^2\ v.s.\ H_1: Not\ H_0\end{cases}$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+library(onewaytests)
+
+bf_N <- water %>% dplyr::filter(derbynor == 1) %>%
+  mutate(group = as.factor(calcium > median(calcium)),
+         residuals_ = model_N$residuals) %>%
+  bf.test(residuals_ ~ group, data = ., verbose = FALSE)
+
+bf_S <- water %>% dplyr::filter(derbynor == 0) %>%
+  mutate(group = as.factor(calcium > median(calcium)),
+         residuals_ = model_S$residuals) %>%
+  bf.test(residuals_ ~ group, data = ., verbose = FALSE)
+```
+
+針對位於Derby北方市鎮的模型的檢定結果如下：檢定統計量$BF$為`r round(bf_N$statistic, 4)`，p值為`r round(bf_N$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備變異同質性，通過變異同質性假設。
+
+針對位於Derby南方市鎮的模型的檢定結果如下：檢定統計量$BF$為`r round(bf_S$statistic, 4)`，p值為`r round(bf_S$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備變異同質性，通過變異同質性假設。
+
+- 結論
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+L <- water$derbynor == 1
+R_2_N <- (var(water[L, 'mortality']) - sigma_2_hat_N) / var(water[L, 'mortality'])
+L <- water$derbynor == 0
+R_2_S <- (var(water[L, 'mortality']) - sigma_2_hat_S) / var(water[L, 'mortality'])
+```
+
+我們分別針對位於Derby北方與南方的市鎮建立了以公共飲水鈣濃度（$X_{ca,N}$與$X_{ca,S}$）來預測湖水水位（$Y_N$與$Y_S$）的線性迴歸模型：
+
+1. \(\hat{Y}_{i,N}=\) `r round(model_N$coefficients[1], 4)` $+$ `r round(model_N$coefficients[2], 4)`\(X_{i,ca,N}, \forall i=1,2,...,35\)
+
+2. \(\hat{Y}_{j,S}=\) `r round(model_S$coefficients[1], 4)` $+$ `r round(model_S$coefficients[2], 4)`\(X_{j,ca,S}, \forall j=1,2,...,26\)
+
+模型解釋力可由經由自由度校正的決定係數$R^2_{adj}$描述，分別為`r round(R_2_N, 4)`與`r round(R_2_S, 4)`，顯示我們建立的兩個迴歸模型都只能解釋依變項少部分的變異，配適結果不佳。此外，亦要注意針對南方市鎮建立的模型並未通過殘差獨立假設。$R^2_{adj}$公式如下：
+
+$$R^2 = 1 - \frac{SS_E / (n - K)}{SS_T / (n-1)}$$
+
+將迴歸線繪製於兩變項的散佈圖上，可看出在公共飲水中擁有相同鈣含量的情況下，北方市鎮死亡率較南方市鎮高。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+water %>%
+  mutate(Location = c('South of Derby', 'North of Derby')[derbynor + 1]) %>%
+  qplot(y = mortality, x = calcium, col = Location, data = .) +
+  geom_abline(slope = model_N$coefficients[2],
+              intercept = model_N$coefficients[1], col = 'darkorange2') +
+  geom_abline(slope = model_S$coefficients[2],
+              intercept = model_S$coefficients[1], col = 'dodgerblue') +
+  scale_colour_manual(values = c('darkorange2', 'dodgerblue')) +
+  theme_bw() + theme(legend.position = 'top') +
+  ggtitle('Scatter Plot of Calcium in Public Water and Avg. Male Mortality\nwith Lines of Two Linear Regression Models')
+```
+
+#### 建立以鈣濃度與是否位於Derby北方預測死亡率的複迴歸模型
+
+- 定義變數：
+
+    - $Y_i$為市鎮$i$之男性平均死亡率
+    - $X_{i,ca}$為市鎮$i$公共飲水之鈣濃度
+    - $X_{i,nor}$為市鎮$i$之相對地理位置，位於Derby北方者記為$1$，位於Derby南方者為$0$
+    - $X_{i,ca \times nor}$為公共飲水中鈣濃度與相對地理位置之交互作用
+
+- 模型：
+
+$$\ Y_{i} = \beta_{0} + \beta_{1}X_{i,ca} + \beta_2X_{i,nor} + \beta_3X_{i, ca \times nor} + \epsilon_{i,N}$$
+其中，$\beta_{0}$為迴歸模型之截距，$\beta_{1}$、$\beta_{2}$與$\beta_{3}$分別為$X_{i,ca}$、$X_{i,nor}$與$X_{i,ca \times nor}$之迴歸係數，$\epsilon_{i}$為模型殘差，且$\epsilon_{i} \overset{iid}\sim  N(0, \sigma^2_i)$
+
+- 研究假設：
+
+我們欲探討市鎮公共飲水鈣濃度、相對地理位置（是否為於Derby北方）以及這兩者的交互作用對於男性平均死亡率的預測力是否顯著，也就是要分別檢定迴歸係數$\beta_{1}$、$\beta_{2}$與$\beta_{3}$是否顯著不為0，研究假說為：
+
+$$\begin{cases} H_0: \beta_{1} = 0\ v.s.\ H_1: \beta_{1} \neq 0 \\ H_0: \beta_{2} = 0\ v.s.\ H_1: \beta_{2} \neq 0 \\ H_0: \beta_3 = 0\ v.s.\ H_1: \beta_3 \neq 0 \end{cases}$$。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+model_NS <- lm(mortality ~ calcium*derbynor, data = water)
+sigma_2_hat_NS <- sum(model_NS$residuals^2) / (length(model_NS$residuals)-1*1-1)
+
+model_NS_tb <- summ(model_NS, confint = TRUE)
+df_NS <- model_NS_tb$coeftable %>% as.data.frame() %>% round(., 4) 
+colnames(df_NS) <- c('估計值', '95%CI下界', '95%CI上界', 't檢定統計量', 'p值')
+rownames(df_NS) <- c('截距 (beta_0)', '鈣濃度 (beta_1)', ' 相對地理位置 (beta_2)', '交互作用 (beta_3)')
+CI_NS <- paste0('[', df_NS$`95%CI下界`[2], ', ', df_NS$`95%CI上界`[2], ']')
+```
+
+- 檢定統計量與結果
+
+依據資料的估計的結果為：
+
+\[ \hat{Y}_{i} = \hat{\beta}_0 + \hat{\beta}_1X_{i,ca} + \hat{\beta}_2X_{i,nor} + \hat{\beta}_3X_{i,ca \times nor}\]
+
+其中\(\hat{\beta}_{0}=\) `r round(model_NS$coefficients[1], 4)`，\(\hat{\beta}_{1}=\) `r round(model_NS$coefficients[2], 4)`，\(\hat{\beta}_{2}=\) `r round(model_NS$coefficients[3], 4)`，\(\hat{\beta}_{3}=\) `r round(model_NS$coefficients[4], 4)`\(\hat{{\sigma}}_i^2=\)`r round(sigma_2_hat_NS, 4)`
+
+令$n$為樣本大小，$k$為獨變項個數，檢定統計量$t_{\beta_j}$（$j = 1, ..., k$）服從自由度$n-k$的t分配，數學式如下：
+
+\[t_{\beta_j} = \frac{{}\hat{\beta_j} - 0}{Var({}\hat{\beta_j})} \sim t(n-k)\]
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+knitr::kable(df_NS)
+
+model_NS_wo_inter <- lm(mortality ~ calcium + derbynor, data = water)
+sigma_2_hat_NSwo_inter <- sum(model_NS_wo_inter$residuals^2) / (length(model_NS_wo_inter$residuals) - 1 - 1 - 1)
+
+model_NS_wo_inter_tb <- summ(model_NS_wo_inter, confint = TRUE)
+df_NS_wo_inter <- model_NS_wo_inter_tb$coeftable %>%
+  as.data.frame() %>% round(., 4) 
+colnames(df_NS_wo_inter) <- c('估計值', '95%CI下界', '95%CI上界', 't檢定統計量', 'p值')
+rownames(df_NS_wo_inter) <- c('截距 (beta_0)', '鈣濃度 (beta_1)', ' 相對地理位置 (beta_2)')
+```
+
+依據資料的估計的結果為：
+
+\[ \hat{Y}_{i} = \hat{\beta}_0 + \hat{\beta}_1X_{i,ca} + \hat{\beta}_2X_{i,nor}\]
+
+其中\(\hat{\beta}_{0}=\) `r round(model_NS_wo_inter$coefficients[1], 4)`，\(\hat{\beta}_{1}=\) `r round(model_NS_wo_inter$coefficients[2], 4)`，\(\hat{\beta}_{2}=\) `r round(model_NS_wo_inter$coefficients[3], 4)`，\(\hat{{\sigma}}_i^2=\)`r round(sigma_2_hat_NSwo_inter, 4)`
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+knitr::kable(df_NS_wo_inter)
+```
+
+我們令顯著水準$\alpha$為$0.05$。檢定結果如上表所示。其中$\beta_1$與$\beta_2$的估計值分別為`r df_NS_wo_inter$估計值[2]`與`r df_NS_wo_inter$估計值[3]`，其p值為`r df_NS_wo_inter$p值[2]`與`r df_NS_wo_inter$p值[3]`，都不小於顯著水準，因此針對兩係數我們都拒絕$H_0$，表示我們有充分證據支持$\beta_{1} = 0$與$\beta_{2} = 0$是錯的，也就是說，公共飲水鈣濃度與相對地理位置對於男性平均死亡率的預測力都顯著。
+
+- 診斷前提假設是否滿足
+
+我們接著針對不考慮交互作用項的線性迴歸模型進行4項基本前提假設的診斷：
+
+1. 線性關係：依變數和獨變項之間的關係必須是線性。
+
+根據先前繪製的鈣濃度與死亡率的散佈圖，可知依變數（死亡率）和獨變項（鈣濃度）之間都呈現的線性負相關。符合。
+
+2. 殘差（$\epsilon$）服從常態分配。
+
+3. 殘差具備獨立性。
+
+4. 殘差具備變異數同質性。
+
+2 - 4這3個假設可表示成：$\epsilon_{i} \overset{iid}\sim  N(0, \sigma^2_i)$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+par(mfcol = c(1, 2))
+plot(model_NS_wo_inter, which = c(1, 2))
+```
+
+Normal Q-Q plot（上右圖）中殘差quantile資料點大部分落在45度線上，顯示殘差可能服從常態分布。而殘差與配適值散佈圖（上左圖）則顯示在各配適值殘差之變異數差異不大。我們接著會進行檢定來確認這些假設是否成立（顯著水準均設為$0.05$）。
+
+- 以Shapiro-Wilk檢定檢驗殘差常態假設：
+
+$$H_0: \epsilon_{i} \sim ND\ v.s.\ H_1: \epsilon_{i}\ does\ not \sim ND$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+shapiro_test_NS <- shapiro.test(model_NS_wo_inter$residuals)
+```
+
+檢定結果如下：檢定統計量$W$為`r round(shapiro_test_NS$statistic, 4)`，p值為`r shapiro_test_NS$p.value`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差並不服從常態分配，通過常態假設。
+
+- 以Durbin-Waston檢定檢驗殘差獨立性：
+
+$$H_0: \epsilon_{i}\ are\ independent.\ v.s.\ H_1: \epsilon_{i}\ are\ not\ independent.$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+dwtest_NS <- dwtest(model_NS_wo_inter)
+```
+
+檢定結果如下：檢定統計量$DW$為`r round(dwtest_NS$statistic, 4)`，p值為`r round(dwtest_NS$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備獨立性，通過獨立假設。
+
+- 以Brown-Forsythe檢定檢驗殘差變異同質性：
+
+$$H_0: {\sigma_1}^2 = {\sigma_2}^2 = ... = {\sigma_{i}}^2\ v.s.\ H_1: Not\ H_0$$
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+bf_NS <- water %>%
+  mutate(group = as.factor(calcium > median(calcium)),
+         residuals_ = model_NS_wo_inter$residuals) %>%
+  bf.test(residuals_ ~ group, data = ., verbose = FALSE)
+```
+
+檢定結果如下：檢定統計量$BF$為`r round(bf_NS$statistic, 4)`，p值為`r round(bf_NS$p.value, 4)`，不小於顯著水準，因此我們不拒絕$H_0$，也就是說我們沒有充分證據支持殘差不具備變異同質性，通過變異同質性假設。
+
+- 結論
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE}
+R_2_NS <- (var(water[,'mortality']) - sigma_2_hat_NSwo_inter) / var(water[, 'mortality'])
+```
+
+我們建立了以公共飲水鈣濃度（$X_{ca}$）與是否位於相對地理位置（$X_{nor}$）來男性平均死亡率（$Y$）的線性迴歸模型：
+
+\(\hat{Y_i}=\) `r round(model_NS_wo_inter$coefficients[1], 4)` $+$ `r round(model_NS_wo_inter$coefficients[2], 4)`\(X_{i,ca} +\) `r round(model_NS_wo_inter$coefficients[3], 4)`\(X_{i,nor},\ \forall i=1,2,...,61\)
+
+模型解釋力可由經由自由度校正的決定係數$R^2_{adj}$描述，為`r round(R_2_NS, 4)`，顯示我們建立的兩個迴歸模型都能解釋依變項超過一半的變異，配適結果尚可。
+
+將迴歸線繪製於兩變項的散佈圖上，一樣可看出在公共飲水中擁有相同鈣含量的情況下，北方市鎮死亡率較南方市鎮高（北方線與南方線截距差為正，也就是\(\hat{\beta}_2\)為正）。此外，由於交互作用項未納入模型中，兩線平行（斜率相同，皆為\(\hat{\beta}_1\)）。
+
+```{r, comment='', message=FALSE, warning=FALSE, echo=FALSE, fig.height=4}
+water %>%
+  qplot(y = mortality, x = calcium, col = factor(derbynor), data = .) +
+  geom_smooth(method = 'lm', se = FALSE) +
+  labs(colour = 'derbynor') +
+  theme_bw() + theme(legend.position = 'top') +
+  ggtitle('Scatter Plot of Calcium in Public Water and Avg. Male Mortality\nwith Lines of One Linear Regreesion Model')
+```
+
+#### 兩種模型建立方式之比較
+
+$R^2_{adj}$越大，表示線性迴歸模型可解釋越多的變異。將「是否位於Derby北方」以虛擬變數（dummy variable）納入複迴歸模型的$R^2_{adj}$為`r round(R_2_NS, 4)`，而針對位於Derby北方與南方市鎮分開建立的兩單迴歸模型的$R^2_{adj}$分別為`r round(R_2_N, 4)`與`r round(R_2_S, 4)`，複迴歸模型明顯高出許多。此外，針對位於Derby南方市鎮建立的單迴歸模型未通過殘差獨立假設的檢驗。因此以複迴歸模型作為最終模型。
+
+不過兩者皆給出了相同的結論：一市鎮公共飲水中鈣濃度越高，其男性平均死亡率越低，且在相同公共飲水鈣濃度下，位於Derby北方的市鎮男性平均死亡率比位於Derby南方的市鎮高。
+
+## 研究結論
+
+1. 一市鎮公共飲水中的鈣濃度與其男性平均死亡率呈現線性負相關。當局可以嘗試增加公共飲水中的鈣濃度。不過以目前的分析不能做出因果關係的推斷。
+
+2. 在相同公共飲水鈣濃度下，位於Derby北方的市鎮男性平均死亡率比位於Derby南方的市鎮高。這可能與氣候、生活條件或其他環境因素有關，可以蒐集相關資料進行更進一步的分析。
+
+## 建議
+
+1. 可再蒐集市鎮的氣候、降雨量、飲食習慣、生活習慣、社會經濟等資料，或許可以進而解釋為何位於Derby北方市鎮死亡率較高。
+
+2. 若能取得各年或各時間點較高頻率的資料，而非一段時間平均後的單一資料點，分析時或許可以考慮時間的效果，並有可能可以做出因果推論。
